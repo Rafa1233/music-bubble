@@ -38,7 +38,9 @@ export default function FullPlayerWithLyrics() {
     isFullPlayerOpen,
     dominantColor,
     lyricsData,
+    lyricsOffset,
     setIsFullPlayerOpen,
+    setLyricsOffset,
     setShuffle,
     togglePlay,
     nextTrack,
@@ -55,19 +57,21 @@ export default function FullPlayerWithLyrics() {
   const lyricsContainerRef = useRef(null);
   const activeLineRef = useRef(null);
 
+  const effectiveTime = currentTime + lyricsOffset;
+
   const activeLyricIndex = useMemo(() => {
     const synced = lyricsData.synced;
     if (!synced || synced.length === 0) return -1;
     let idx = -1;
     for (let i = 0; i < synced.length; i++) {
-      if (currentTime >= synced[i].time - 0.15) {
+      if (effectiveTime >= synced[i].time - 0.15) {
         idx = i;
       } else {
         break;
       }
     }
     return idx;
-  }, [lyricsData.synced, currentTime]);
+  }, [lyricsData.synced, effectiveTime]);
 
   useEffect(() => {
     if (activeLineRef.current && lyricsContainerRef.current) {
@@ -91,8 +95,8 @@ export default function FullPlayerWithLyrics() {
           initial={{ y: '100%' }}
           animate={{ y: 0 }}
           exit={{ y: '100%' }}
-          transition={{ type: 'spring', stiffness: 280, damping: 30 }}
-          className="fixed inset-0 z-50 flex flex-col text-white overflow-hidden"
+          transition={{ type: 'spring', stiffness: 300, damping: 32 }}
+          className="fixed inset-0 z-50 flex flex-col text-white overflow-hidden gpu-layer"
           style={{
             background: `radial-gradient(circle at 50% 15%, ${dominantColor} 0%, #09090f 65%, #040406 100%)`,
           }}
@@ -108,7 +112,7 @@ export default function FullPlayerWithLyrics() {
 
             <div className="text-center">
               <p className="text-[11px] uppercase tracking-widest opacity-70 font-semibold">
-                Sedang Diputar
+                {currentTrack.isFullTrack ? 'Full Track' : 'Preview 30 Detik'}
               </p>
               <p className="text-xs font-medium opacity-85 truncate max-w-[180px]">
                 {currentTrack.album}
@@ -135,7 +139,7 @@ export default function FullPlayerWithLyrics() {
             >
               <div className="flex-1 flex items-center justify-center py-2">
                 <div
-                  className={`relative w-60 h-60 sm:w-72 sm:h-72 overflow-hidden shadow-2xl flex items-center justify-center bg-zinc-900/70 border border-white/20 ${
+                  className={`relative w-56 h-56 sm:w-72 sm:h-72 overflow-hidden shadow-2xl flex items-center justify-center bg-zinc-900/70 border border-white/20 ${
                     settings.artworkStyle === 'vinyl'
                       ? 'rounded-full disc-spin'
                       : settings.artworkStyle === 'float'
@@ -174,20 +178,20 @@ export default function FullPlayerWithLyrics() {
                       animate={
                         isPlaying
                           ? {
-                              height: [
-                                `${20 + ((i * 17) % 30)}%`,
-                                `${55 + ((i * 29) % 45)}%`,
-                                `${20 + ((i * 13) % 25)}%`,
+                              scaleY: [
+                                0.25 + ((i * 7) % 3) * 0.1,
+                                0.65 + ((i * 11) % 4) * 0.1,
+                                0.25 + ((i * 5) % 3) * 0.08,
                               ],
                             }
-                          : { height: '20%' }
+                          : { scaleY: 0.2 }
                       }
                       transition={{
                         repeat: Infinity,
-                        duration: 0.45 + (i % 5) * 0.12,
+                        duration: 0.42 + (i % 5) * 0.1,
                         ease: 'easeInOut',
                       }}
-                      className="w-1.5 rounded-full opacity-85"
+                      className="w-1.5 h-full origin-bottom rounded-full opacity-85 gpu-layer"
                       style={{ backgroundColor: settings.accentColor }}
                     />
                   ))}
@@ -234,7 +238,7 @@ export default function FullPlayerWithLyrics() {
                   style={{
                     background: `linear-gradient(to right, ${settings.accentColor} ${progressPct}%, rgba(255,255,255,0.2) ${progressPct}%)`,
                     borderRadius: '9999px',
-                    height: '5px',
+                    height: '6px',
                   }}
                 />
                 <div className="flex justify-between text-xs opacity-70 mt-1.5 font-mono">
@@ -315,7 +319,7 @@ export default function FullPlayerWithLyrics() {
                   style={{
                     background: `linear-gradient(to right, ${settings.accentColor} ${volume * 100}%, rgba(255,255,255,0.2) ${volume * 100}%)`,
                     borderRadius: '9999px',
-                    height: '5px',
+                    height: '6px',
                   }}
                 />
               </div>
@@ -324,17 +328,32 @@ export default function FullPlayerWithLyrics() {
             <div
               className={`${
                 showLyricsMobile ? 'flex' : 'hidden md:flex'
-              } flex-col bubble-glass rounded-3xl p-5 overflow-hidden h-full max-h-[76vh]`}
+              } flex-col rounded-3xl p-5 overflow-hidden h-full max-h-[76vh] bg-black/35 backdrop-blur-xl border border-white/15`}
             >
-              <div className="flex items-center justify-between mb-3 shrink-0">
-                <span className="text-xs font-semibold uppercase tracking-widest opacity-75 flex items-center gap-2">
-                  <Mic2 className="w-4 h-4" style={{ color: settings.accentColor }} />
-                  Live Lirik (LRCLIB)
-                </span>
-                {lyricsData.synced.length > 0 && (
-                  <span className="text-[11px] px-2.5 py-0.5 rounded-full bg-white/10 opacity-80">
-                    Ketuk baris untuk lompat
+              <div className="flex flex-wrap items-center justify-between gap-2 mb-2 shrink-0">
+                <div className="min-w-0">
+                  <span className="text-xs font-semibold uppercase tracking-widest opacity-80 flex items-center gap-2">
+                    <Mic2 className="w-4 h-4" style={{ color: settings.accentColor }} />
+                    Live Lirik (LRCLIB)
                   </span>
+                  {lyricsData.matchedTitle && (
+                    <p className="text-[11px] opacity-65 truncate mt-0.5">{lyricsData.matchedTitle}</p>
+                  )}
+                </div>
+
+                {lyricsData.synced.length > 0 && (
+                  <div className="flex items-center gap-1">
+                    {[-15, -1, 1, 15].map((delta) => (
+                      <button
+                        key={delta}
+                        type="button"
+                        onClick={() => setLyricsOffset((v) => v + delta)}
+                        className="px-2 py-0.5 rounded-lg bg-white/10 hover:bg-white/20 text-[10px] font-mono"
+                      >
+                        {delta > 0 ? `+${delta}s` : `${delta}s`}
+                      </button>
+                    ))}
+                  </div>
                 )}
               </div>
 
@@ -343,7 +362,7 @@ export default function FullPlayerWithLyrics() {
                 className="flex-1 overflow-y-auto no-scrollbar py-12 space-y-4 text-center"
               >
                 {lyricsData.loading ? (
-                  <p className="text-sm opacity-65 animate-pulse">Mencari lirik sinkron...</p>
+                  <p className="text-sm opacity-65 animate-pulse">Mencari lirik yang cocok...</p>
                 ) : lyricsData.synced.length > 0 ? (
                   lyricsData.synced.map((line, i) => {
                     const isActive = i === activeLyricIndex;
@@ -352,14 +371,17 @@ export default function FullPlayerWithLyrics() {
                         key={`${line.time}-${i}`}
                         ref={isActive ? activeLineRef : null}
                         type="button"
-                        onClick={() => seekTo(line.time)}
+                        onClick={() => {
+                          const target = Math.max(0, line.time - lyricsOffset);
+                          seekTo(target);
+                        }}
                         className="block w-full text-center px-3 py-1 transition-all duration-300 cursor-pointer"
                         style={{
-                          opacity: isActive ? 1 : 0.35,
-                          transform: isActive ? 'scale(1.08)' : 'scale(1)',
-                          filter: isActive ? 'none' : 'blur(0.5px)',
-                          color: isActive ? '#ffffff' : 'rgba(255,255,255,0.85)',
-                          textShadow: isActive ? `0 0 20px ${settings.accentColor}` : 'none',
+                          opacity: isActive ? 1 : 0.36,
+                          transform: isActive ? 'scale(1.07)' : 'scale(1)',
+                          filter: isActive ? 'none' : 'blur(0.4px)',
+                          color: '#ffffff',
+                          textShadow: isActive ? `0 0 22px ${settings.accentColor}` : 'none',
                         }}
                       >
                         <span
@@ -373,13 +395,13 @@ export default function FullPlayerWithLyrics() {
                     );
                   })
                 ) : lyricsData.plain ? (
-                  <div className="text-sm sm:text-base leading-loose whitespace-pre-line opacity-85 px-2">
+                  <div className="text-sm sm:text-base leading-loose whitespace-pre-line opacity-90 px-2">
                     {lyricsData.plain}
                   </div>
                 ) : (
-                  <div className="h-full flex flex-col items-center justify-center opacity-60 gap-2">
+                  <div className="h-full flex flex-col items-center justify-center opacity-65 gap-2">
                     <Mic2 className="w-8 h-8" />
-                    <p className="text-sm">Lirik belum tersedia untuk lagu ini.</p>
+                    <p className="text-sm">Lirik resmi untuk lagu ini tidak ditemukan di LRCLIB.</p>
                   </div>
                 )}
               </div>

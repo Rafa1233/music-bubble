@@ -15,7 +15,7 @@ export default function Library() {
     removeLocalTrack,
     playTrack,
   } = useAudio();
-  const { settings, isLightMode } = useTheme();
+  const { settings } = useTheme();
 
   const [tab, setTab] = useState('liked');
   const [selectedPlaylistId, setSelectedPlaylistId] = useState(null);
@@ -34,8 +34,8 @@ export default function Library() {
   };
 
   return (
-    <div className="space-y-5 pb-4">
-      <div className="flex gap-2">
+    <div className="space-y-5 pb-6">
+      <div className="flex flex-wrap gap-2">
         {[
           { id: 'liked', label: `Disukai (${likedSongs.length})`, icon: Heart },
           { id: 'playlists', label: `Playlist (${playlists.length})`, icon: ListMusic },
@@ -52,7 +52,7 @@ export default function Library() {
                 setSelectedPlaylistId(null);
               }}
               className={`px-3.5 py-2 rounded-2xl text-xs font-semibold flex items-center gap-1.5 transition ${
-                active ? 'text-zinc-950' : 'glass-card opacity-80'
+                active ? 'text-zinc-950' : 'glass-card text-main opacity-85'
               }`}
               style={active ? { backgroundColor: settings.accentColor } : undefined}
             >
@@ -65,7 +65,7 @@ export default function Library() {
       {tab === 'liked' && (
         <div className="space-y-2.5">
           {likedSongs.length === 0 ? (
-            <div className="glass-card rounded-3xl p-8 text-center opacity-75">
+            <div className="glass-card rounded-3xl p-8 text-center text-muted">
               <Heart className="w-10 h-10 mx-auto mb-2 opacity-60" />
               <p className="text-sm">Belum ada lagu yang disukai. Tekan ikon hati pada lagu favoritmu!</p>
             </div>
@@ -82,23 +82,21 @@ export default function Library() {
           {!activePlaylist ? (
             <>
               <form onSubmit={handleCreatePlaylist} className="glass-card rounded-3xl p-4 space-y-3">
-                <p className={`text-sm font-heading font-bold ${isLightMode ? 'text-slate-900' : 'text-white'}`}>
-                  Buat Playlist Baru
-                </p>
+                <p className="text-sm font-heading font-bold text-main">Buat Playlist Baru</p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                   <input
                     type="text"
                     value={newName}
                     onChange={(e) => setNewName(e.target.value)}
                     placeholder="Nama playlist (misal: Malam Galau)"
-                    className="rounded-xl bg-white/10 border border-white/15 px-3 py-2 text-sm outline-none"
+                    className="glass-input rounded-xl px-3 py-2 text-sm outline-none"
                   />
                   <input
                     type="text"
                     value={newDesc}
                     onChange={(e) => setNewDesc(e.target.value)}
                     placeholder="Deskripsi singkat (opsional)"
-                    className="rounded-xl bg-white/10 border border-white/15 px-3 py-2 text-sm outline-none"
+                    className="glass-input rounded-xl px-3 py-2 text-sm outline-none"
                   />
                 </div>
                 <button
@@ -118,8 +116,8 @@ export default function Library() {
                     className="glass-card rounded-2xl p-4 flex items-center justify-between gap-3 cursor-pointer hover:scale-[1.01] transition"
                   >
                     <div className="min-w-0">
-                      <p className="font-heading font-bold truncate">{pl.name}</p>
-                      <p className="text-xs opacity-70 truncate">
+                      <p className="font-heading font-bold truncate text-main">{pl.name}</p>
+                      <p className="text-xs text-muted truncate">
                         {pl.description || `${pl.tracks.length} lagu tersimpan`}
                       </p>
                     </div>
@@ -152,7 +150,7 @@ export default function Library() {
                 <button
                   type="button"
                   onClick={() => setSelectedPlaylistId(null)}
-                  className="text-xs font-semibold underline opacity-80"
+                  className="text-xs font-semibold underline text-main opacity-85"
                 >
                   ← Kembali ke Semua Playlist
                 </button>
@@ -169,14 +167,14 @@ export default function Library() {
               </div>
 
               <div className="glass-card rounded-2xl p-4">
-                <h3 className="text-lg font-heading font-bold">{activePlaylist.name}</h3>
+                <h3 className="text-lg font-heading font-bold text-main">{activePlaylist.name}</h3>
                 {activePlaylist.description && (
-                  <p className="text-xs opacity-70">{activePlaylist.description}</p>
+                  <p className="text-xs text-muted">{activePlaylist.description}</p>
                 )}
               </div>
 
               {activePlaylist.tracks.length === 0 ? (
-                <p className="text-sm opacity-70 text-center py-6">
+                <p className="text-sm text-muted text-center py-6">
                   Playlist kosong. Gunakan ikon "+" pada lagu untuk menambahkannya!
                 </p>
               ) : (
@@ -203,7 +201,7 @@ export default function Library() {
       {tab === 'local' && (
         <div className="space-y-2.5">
           {localTracks.length === 0 ? (
-            <div className="glass-card rounded-3xl p-8 text-center opacity-75">
+            <div className="glass-card rounded-3xl p-8 text-center text-muted">
               <HardDrive className="w-10 h-10 mx-auto mb-2 opacity-60" />
               <p className="text-sm">Belum ada audio lokal. Unggah file MP3/WAV/FLAC melalui halaman Search!</p>
             </div>

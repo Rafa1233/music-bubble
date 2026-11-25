@@ -3,7 +3,7 @@ import { saveBlobToIDB, getBlobFromIDB, deleteBlobFromIDB } from '../utils/idbSt
 
 const ThemeContext = createContext(null);
 
-const STORAGE_KEY = 'aurasound_theme_settings_v2';
+const STORAGE_KEY = 'aurasound_theme_settings_v3';
 const CUSTOM_BG_IDB_KEY = 'custom_bg_media_blob';
 export const MAX_BG_VIDEO_SECONDS = 30 * 60;
 
@@ -33,9 +33,9 @@ export const BASE_THEMES = {
   },
   light: {
     id: 'light',
-    label: 'Soft Light Glass',
-    bg: '#eef2f9',
-    gradient: 'linear-gradient(135deg, #e0ecff 0%, #f5f3ff 50%, #fce7f3 100%)',
+    label: 'Soft Light Glass (Putih)',
+    bg: '#f1f5f9',
+    gradient: 'linear-gradient(135deg, #f8fafc 0%, #e0ecff 50%, #f3e8ff 100%)',
     isLight: true,
   },
 };
@@ -43,29 +43,40 @@ export const BASE_THEMES = {
 const DEFAULT_SETTINGS = {
   accentColor: '#10b981',
   baseTheme: 'midnight',
+  textContrastMode: 'auto',
   customGradientStart: '#0f172a',
   customGradientEnd: '#1e1b4b',
   useCustomGradient: false,
-  glassBlur: 24,
-  bubbleOpacity: 10,
+  glassBlur: 22,
+  bubbleOpacity: 12,
   visualizerEnabled: true,
-  visualizerStyle: 'bars',
   bgEffect: 'orbs',
   pageTransition: 'liquid',
   cardAnimation: 'spring',
   profileAnimation: 'aurora',
   artworkStyle: 'glass',
+  highRefreshMode: true,
   customBgMeta: null,
-  customBgDim: 45,
+  customBgDim: 40,
 };
 
 function hexToRgbTuple(hex) {
-  const clean = hex.replace('#', '');
+  const clean = (hex || '').replace('#', '');
   if (clean.length !== 6) return '16, 185, 129';
   const r = parseInt(clean.slice(0, 2), 16);
   const g = parseInt(clean.slice(2, 4), 16);
   const b = parseInt(clean.slice(4, 6), 16);
   return `${r}, ${g}, ${b}`;
+}
+
+function isHexLight(hex) {
+  const clean = (hex || '').replace('#', '');
+  if (clean.length !== 6) return false;
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.62;
 }
 
 export function ThemeProvider({ children }) {
@@ -99,6 +110,18 @@ export function ThemeProvider({ children }) {
     };
   }, [settings.customBgMeta]);
 
+  const computeIsLightMode = () => {
+    if (settings.textContrastMode === 'dark') return true;
+    if (settings.textContrastMode === 'light') return false;
+    if (settings.customBgMeta) return false;
+    if (settings.useCustomGradient) {
+      return isHexLight(settings.customGradientStart) || isHexLight(settings.customGradientEnd);
+    }
+    return Boolean(BASE_THEMES[settings.baseTheme]?.isLight);
+  };
+
+  const isLightMode = computeIsLightMode();
+
   useEffect(() => {
     try {
       localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
@@ -111,14 +134,8 @@ export function ThemeProvider({ children }) {
     root.style.setProperty('--accent-rgb', hexToRgbTuple(settings.accentColor));
     root.style.setProperty('--glass-blur', `${settings.glassBlur}px`);
     root.style.setProperty('--bubble-opacity', String(settings.bubbleOpacity / 100));
-
-    const themeObj = BASE_THEMES[settings.baseTheme] || BASE_THEMES.midnight;
-    if (themeObj.isLight && !settings.customBgMeta) {
-      root.setAttribute('data-theme', 'light');
-    } else {
-      root.setAttribute('data-theme', 'dark');
-    }
-  }, [settings]);
+    root.setAttribute('data-theme', isLightMode ? 'light' : 'dark');
+  }, [settings, isLightMode]);
 
   const updateSetting = useCallback((key, value) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
@@ -130,7 +147,7 @@ export function ThemeProvider({ children }) {
     const isImage = file.type.startsWith('image/');
 
     if (!isVideo && !isImage) {
-      return { ok: false, error: 'Format harus berupa gambar (JPG/PNG/WEBP/GIF) atau video (MP4/WEBM).' };
+      return { ok: false, error: 'Format harus gambar (JPG/PNG/WEBP/GIF) atau video (MP4/WEBM).' };
     }
 
     let duration = 0;
@@ -146,7 +163,7 @@ export function ThemeProvider({ children }) {
         };
         video.onerror = () => {
           URL.revokeObjectURL(tempUrl);
-          reject(new Error('Gagal membaca metadata video.'));
+          reject(new Error('Gagal membaca video.'));
         };
         video.src = tempUrl;
       }).catch(() => -1);
@@ -186,9 +203,6 @@ export function ThemeProvider({ children }) {
     setCustomBgUrl(null);
     setSettings(DEFAULT_SETTINGS);
   }, []);
-
-  const isLightMode =
-    BASE_THEMES[settings.baseTheme]?.isLight && !settings.customBgMeta && !settings.useCustomGradient;
 
   return (
     <ThemeContext.Provider

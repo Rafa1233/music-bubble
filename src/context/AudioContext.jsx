@@ -20,6 +20,8 @@ export function AudioProvider({ children }) {
   const playSeqRef = useRef(0);
 
   const [catalog, setCatalog] = useState([]);
+  const [fullCatalog, setFullCatalog] = useState([]);
+  const [popCatalog, setPopCatalog] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(true);
 
   const [queue, setQueue] = useState([]);
@@ -36,7 +38,13 @@ export function AudioProvider({ children }) {
 
   const [isFullPlayerOpen, setIsFullPlayerOpen] = useState(false);
   const [dominantColor, setDominantColor] = useState('#10b981');
-  const [lyricsData, setLyricsData] = useState({ synced: [], plain: null, loading: false });
+  const [lyricsData, setLyricsData] = useState({
+    synced: [],
+    plain: null,
+    matchedTitle: '',
+    loading: false,
+  });
+  const [lyricsOffset, setLyricsOffset] = useState(0);
 
   const [user, setUser] = useState(null);
   const [likedSongs, setLikedSongs] = useState([]);
@@ -69,7 +77,7 @@ export function AudioProvider({ children }) {
           if (blob) {
             const url = URL.createObjectURL(blob);
             createdUrls.push(url);
-            restored.push({ ...item, audioUrl: url });
+            restored.push({ ...item, isFullTrack: true, audioUrl: url });
           }
         }
         setLocalTracks(restored);
@@ -114,12 +122,14 @@ export function AudioProvider({ children }) {
     let mounted = true;
     setCatalogLoading(true);
     fetchCuratedCatalog()
-      .then((tracks) => {
+      .then((res) => {
         if (!mounted) return;
-        setCatalog(tracks);
-        if (tracks.length > 0) {
-          setQueue((prev) => (prev.length === 0 ? tracks : prev));
-          setCurrentTrack((prev) => prev || tracks[0]);
+        setFullCatalog(res.fullTracks);
+        setPopCatalog(res.popTracks);
+        setCatalog(res.all);
+        if (res.all.length > 0) {
+          setQueue((prev) => (prev.length === 0 ? res.all : prev));
+          setCurrentTrack((prev) => prev || res.all[0]);
         }
       })
       .finally(() => {
@@ -133,15 +143,21 @@ export function AudioProvider({ children }) {
   useEffect(() => {
     if (!currentTrack) return;
     let active = true;
+    setLyricsOffset(0);
 
     extractDominantColor(currentTrack.cover, currentTrack.title + currentTrack.artist).then((c) => {
       if (active) setDominantColor(c);
     });
 
-    setLyricsData({ synced: [], plain: null, loading: true });
-    fetchTrackLyrics(currentTrack.title, currentTrack.artist).then((res) => {
+    setLyricsData({ synced: [], plain: null, matchedTitle: '', loading: true });
+    fetchTrackLyrics(currentTrack.title, currentTrack.artist, currentTrack.duration).then((res) => {
       if (active) {
-        setLyricsData({ synced: res.synced, plain: res.plain, loading: false });
+        setLyricsData({
+          synced: res.synced,
+          plain: res.plain,
+          matchedTitle: res.matchedTitle || '',
+          loading: false,
+        });
       }
     });
 
@@ -150,50 +166,53 @@ export function AudioProvider({ children }) {
     };
   }, [currentTrack?.id]);
 
-  const playTrack = useCallback(async (track, customQueue = null) => {
-    if (!track || !track.audioUrl) {
-      setAudioError('Sumber audio tidak tersedia.');
-      return;
-    }
-
-    const audio = audioRef.current;
-    if (!audio) return;
-
-    const seq = ++playSeqRef.current;
-    setAudioError('');
-    setIsBuffering(true);
-
-    if (Array.isArray(customQueue) && customQueue.length > 0) {
-      setQueue(customQueue);
-    } else {
-      setQueue((prev) => (prev.some((t) => t.id === track.id) ? prev : [track, ...prev]));
-    }
-
-    setCurrentTrack(track);
-    setRecentTracks((prev) => [track, ...prev.filter((t) => t.id !== track.id)].slice(0, 20));
-
-    try {
-      if (audio.error || audio.src !== track.audioUrl) {
-        audio.pause();
-        audio.src = track.audioUrl;
-        audio.load();
+  const playTrack = useCallback(
+    async (track, customQueue = null) => {
+      if (!track || !track.audioUrl) {
+        setAudioError('Sumber audio tidak tersedia.');
+        return;
       }
-      audio.volume = volume;
-      await audio.play();
-      if (playSeqRef.current === seq) {
-        setIsPlaying(true);
-        setIsBuffering(false);
+
+      const audio = audioRef.current;
+      if (!audio) return;
+
+      const seq = ++playSeqRef.current;
+      setAudioError('');
+      setIsBuffering(true);
+
+      if (Array.isArray(customQueue) && customQueue.length > 0) {
+        setQueue(customQueue);
+      } else {
+        setQueue((prev) => (prev.some((t) => t.id === track.id) ? prev : [track, ...prev]));
       }
-    } catch (err) {
-      if (playSeqRef.current === seq) {
-        setIsPlaying(false);
-        setIsBuffering(false);
-        if (err?.name !== 'AbortError') {
-          setAudioError('Ketuk tombol Play untuk memulai audio.');
+
+      setCurrentTrack(track);
+      setRecentTracks((prev) => [track, ...prev.filter((t) => t.id !== track.id)].slice(0, 20));
+
+      try {
+        if (audio.error || audio.src !== track.audioUrl) {
+          audio.pause();
+          audio.src = track.audioUrl;
+          audio.load();
+        }
+        audio.volume = volume;
+        await audio.play();
+        if (playSeqRef.current === seq) {
+          setIsPlaying(true);
+          setIsBuffering(false);
+        }
+      } catch (err) {
+        if (playSeqRef.current === seq) {
+          setIsPlaying(false);
+          setIsBuffering(false);
+          if (err?.name !== 'AbortError') {
+            setAudioError('Ketuk tombol Play untuk memulai pemutaran.');
+          }
         }
       }
-    }
-  }, [volume]);
+    },
+    [volume]
+  );
 
   const togglePlay = useCallback(async () => {
     const audio = audioRef.current;
@@ -446,6 +465,7 @@ export function AudioProvider({ children }) {
         album: 'Perangkat Saya',
         cover: '',
         duration: 0,
+        isFullTrack: true,
         source: 'local',
         genre: 'Lokal',
       };
@@ -492,6 +512,8 @@ export function AudioProvider({ children }) {
     <AudioContext.Provider
       value={{
         catalog,
+        fullCatalog,
+        popCatalog,
         catalogLoading,
         queue,
         currentTrack,
@@ -506,12 +528,14 @@ export function AudioProvider({ children }) {
         isFullPlayerOpen,
         dominantColor,
         lyricsData,
+        lyricsOffset,
         user,
         likedSongs,
         playlists,
         recentTracks,
         localTracks,
         setIsFullPlayerOpen,
+        setLyricsOffset,
         setShuffle,
         playTrack,
         togglePlay,

@@ -1,0 +1,12 @@
+{
+  "appId": "com.aurasound.music",
+  "appName": "AuraSound",
+  "webDir": "dist",
+  "android": {
+    "allowMixedContent": true,
+    "captureInput": true
+  },
+  "server": {
+    "androidScheme": "https"
+  }
+}

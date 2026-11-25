@@ -18,6 +18,7 @@ function MainShell() {
   const { settings } = useTheme();
   const [activeTab, setActiveTab] = useState('home');
   const [direction, setDirection] = useState(1);
+  const [swipeProgress, setSwipeProgress] = useState(0);
 
   const touchStartRef = useRef({ x: 0, y: 0, blocked: false });
 
@@ -27,6 +28,7 @@ function MainShell() {
     const nextIdx = TAB_ORDER.indexOf(nextTab);
     setDirection(nextIdx >= prevIdx ? 1 : -1);
     setActiveTab(nextTab);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handleTouchStart = (e) => {
@@ -36,14 +38,26 @@ function MainShell() {
       y: e.touches[0].clientY,
       blocked,
     };
+    setSwipeProgress(0);
+  };
+
+  const handleTouchMove = (e) => {
+    if (touchStartRef.current.blocked) return;
+    const dx = e.touches[0].clientX - touchStartRef.current.x;
+    const dy = e.touches[0].clientY - touchStartRef.current.y;
+    if (Math.abs(dx) > 18 && Math.abs(dx) > Math.abs(dy) * 1.2) {
+      const clamped = Math.max(-1, Math.min(1, dx / 180));
+      setSwipeProgress(clamped);
+    }
   };
 
   const handleTouchEnd = (e) => {
+    setSwipeProgress(0);
     if (touchStartRef.current.blocked) return;
     const dx = e.changedTouches[0].clientX - touchStartRef.current.x;
     const dy = e.changedTouches[0].clientY - touchStartRef.current.y;
 
-    if (Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy) * 1.5) {
+    if (Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy) * 1.45) {
       const idx = TAB_ORDER.indexOf(activeTab);
       if (dx < 0 && idx < TAB_ORDER.length - 1) {
         switchTab(TAB_ORDER[idx + 1]);
@@ -76,9 +90,9 @@ function MainShell() {
       case 'liquid':
       default:
         return {
-          initial: { opacity: 0, x: direction * 36 },
-          animate: { opacity: 1, x: 0 },
-          exit: { opacity: 0, x: direction * -36 },
+          initial: { opacity: 0, x: direction * 38, scale: 0.985 },
+          animate: { opacity: 1, x: 0, scale: 1 },
+          exit: { opacity: 0, x: direction * -38, scale: 0.985 },
         };
     }
   };
@@ -88,13 +102,14 @@ function MainShell() {
   return (
     <div
       onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
       className="min-h-screen w-full relative flex flex-col"
     >
       <BackgroundCanvas />
       <Header onOpenSettings={() => switchTab('settings')} />
 
-      <main className="flex-1 w-full max-w-6xl mx-auto px-4 pt-2 pb-44">
+      <main className="flex-1 w-full max-w-6xl mx-auto px-4 pt-2 pb-56">
         <AnimatePresence mode="wait">
           <motion.div
             key={activeTab}
@@ -102,7 +117,8 @@ function MainShell() {
             initial="initial"
             animate="animate"
             exit="exit"
-            transition={{ type: 'spring', stiffness: 320, damping: 28 }}
+            transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+            className="gpu-layer"
           >
             {activeTab === 'home' && <Home />}
             {activeTab === 'search' && <Search />}
@@ -113,7 +129,11 @@ function MainShell() {
       </main>
 
       <MiniPlayer />
-      <BubbleNavbar activeTab={activeTab} onChangeTab={switchTab} />
+      <BubbleNavbar
+        activeTab={activeTab}
+        onChangeTab={switchTab}
+        swipeProgress={swipeProgress}
+      />
       <FullPlayerWithLyrics />
     </div>
   );

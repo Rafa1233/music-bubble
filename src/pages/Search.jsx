@@ -6,11 +6,11 @@ import { useTheme } from '../context/ThemeContext';
 import SongCard from '../components/SongCard';
 
 const HISTORY_KEY = 'aurasound_search_history_v1';
-const CATEGORIES = ['Semua', 'Lagu', 'Artis', 'Lokal'];
+const CATEGORIES = ['Semua', 'Full Track', 'Pop & Artis', 'Lokal'];
 
 export default function Search() {
   const { localTracks, uploadLocalAudioFiles, catalog } = useAudio();
-  const { settings, isLightMode } = useTheme();
+  const { settings } = useTheme();
 
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('Semua');
@@ -33,9 +33,7 @@ export default function Search() {
       setResults(
         q
           ? localTracks.filter(
-              (t) =>
-                t.title.toLowerCase().includes(q) ||
-                t.artist.toLowerCase().includes(q)
+              (t) => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q)
             )
           : localTracks
       );
@@ -52,10 +50,10 @@ export default function Search() {
       try {
         const fetched = await searchMusic(query.trim(), 24);
         let filtered = fetched;
-        if (category === 'Artis') {
-          const qLower = query.trim().toLowerCase();
-          const byArtist = fetched.filter((t) => t.artist.toLowerCase().includes(qLower));
-          filtered = byArtist.length > 0 ? byArtist : fetched;
+        if (category === 'Full Track') {
+          filtered = fetched.filter((t) => t.isFullTrack);
+        } else if (category === 'Pop & Artis') {
+          filtered = fetched.filter((t) => !t.isFullTrack);
         }
         setResults(filtered);
         setHistory((prev) => {
@@ -89,21 +87,19 @@ export default function Search() {
   };
 
   return (
-    <div className="space-y-5 pb-4">
+    <div className="space-y-5 pb-6">
       <div className="flex flex-col sm:flex-row gap-2.5">
-        <div className="glass-card flex-1 rounded-2xl px-4 py-3 flex items-center gap-3">
-          <SearchIcon className="w-5 h-5 opacity-70 shrink-0" />
+        <div className="glass-input flex-1 rounded-2xl px-4 py-3 flex items-center gap-3">
+          <SearchIcon className="w-5 h-5 text-muted shrink-0" />
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Cari lagu, artis (contoh: Mahalini, Tulus, NIKI)..."
-            className={`w-full bg-transparent outline-none text-sm ${
-              isLightMode ? 'text-slate-900 placeholder:text-slate-500' : 'text-white placeholder:text-white/50'
-            }`}
+            placeholder="Cari lagu full / artis (Mahalini, Tulus, lofi, remix)..."
+            className="w-full bg-transparent outline-none text-sm text-main placeholder:opacity-60"
           />
           {query && (
-            <button type="button" onClick={() => setQuery('')} className="opacity-70 hover:opacity-100">
+            <button type="button" onClick={() => setQuery('')} className="text-muted hover:text-main">
               <X className="w-4 h-4" />
             </button>
           )}
@@ -123,12 +119,12 @@ export default function Search() {
           className="px-4 py-3 rounded-2xl font-semibold text-sm text-zinc-950 flex items-center justify-center gap-2 shrink-0 shadow-md hover:brightness-110 active:scale-95 transition"
           style={{ backgroundColor: settings.accentColor }}
         >
-          <Upload className="w-4 h-4" /> Putar File MP3/FLAC
+          <Upload className="w-4 h-4" /> Putar MP3/FLAC Lokal
         </button>
       </div>
 
       {uploadMsg && (
-        <div className="glass-card rounded-2xl px-4 py-2.5 text-xs font-medium flex items-center justify-between">
+        <div className="glass-card rounded-2xl px-4 py-2.5 text-xs font-medium flex items-center justify-between text-main">
           <span>{uploadMsg}</span>
           <button type="button" onClick={() => setUploadMsg('')}>
             <X className="w-4 h-4" />
@@ -136,7 +132,7 @@ export default function Search() {
         </div>
       )}
 
-      <div className="flex items-center gap-2 overflow-x-auto no-scrollbar">
+      <div data-no-tab-swipe className="flex items-center gap-2 overflow-x-auto no-scrollbar">
         {CATEGORIES.map((cat) => {
           const active = category === cat;
           return (
@@ -145,7 +141,7 @@ export default function Search() {
               type="button"
               onClick={() => setCategory(cat)}
               className={`px-4 py-1.5 rounded-full text-xs font-semibold transition shrink-0 ${
-                active ? 'text-zinc-950' : 'glass-card opacity-80 hover:opacity-100'
+                active ? 'text-zinc-950' : 'glass-card text-main opacity-80 hover:opacity-100'
               }`}
               style={active ? { backgroundColor: settings.accentColor } : undefined}
             >
@@ -157,7 +153,7 @@ export default function Search() {
 
       {!query && category !== 'Lokal' && history.length > 0 && (
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider opacity-65 mb-2 flex items-center gap-1.5">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted mb-2 flex items-center gap-1.5">
             <Clock className="w-3.5 h-3.5" /> Pencarian Terakhir
           </p>
           <div className="flex flex-wrap gap-2">
@@ -166,7 +162,7 @@ export default function Search() {
                 key={item}
                 type="button"
                 onClick={() => setQuery(item)}
-                className="glass-card px-3 py-1.5 rounded-full text-xs hover:bg-white/15 transition"
+                className="glass-card px-3 py-1.5 rounded-full text-xs text-main"
               >
                 {item}
               </button>
@@ -188,13 +184,13 @@ export default function Search() {
           ))}
         </div>
       ) : query.trim() ? (
-        <div className="glass-card rounded-3xl p-8 text-center opacity-75">
+        <div className="glass-card rounded-3xl p-8 text-center text-muted">
           <Music className="w-10 h-10 mx-auto mb-2 opacity-60" />
           <p className="text-sm">Tidak ada lagu ditemukan untuk "{query}".</p>
         </div>
       ) : (
         <div>
-          <p className="text-sm font-heading font-bold mb-3">Jelajahi Populer</p>
+          <p className="text-sm font-heading font-bold mb-3 text-main">Jelajahi Populer</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
             {catalog.slice(0, 8).map((track, idx) => (
               <SongCard key={track.id} track={track} queueList={catalog} index={idx} />

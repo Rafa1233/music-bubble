@@ -1,19 +1,64 @@
-import React from 'react';
-import { Play, Sparkles, Disc3 } from 'lucide-react';
+import React, { useState } from 'react';
+import { Play, Sparkles, Disc3, Flame } from 'lucide-react';
 import { useAudio } from '../context/AudioContext';
 import { useTheme } from '../context/ThemeContext';
 import SongCard from '../components/SongCard';
 
-export default function Home() {
-  const { catalog, catalogLoading, recentTracks, playlists, playTrack, currentTrack } = useAudio();
-  const { settings, isLightMode } = useTheme();
+const MOOD_FILTERS = [
+  { id: 'all', label: 'Semua' },
+  { id: 'full', label: 'Full Track Gratis' },
+  { id: 'pop', label: 'Indo & Global Pop' },
+  { id: 'local', label: 'Audio Lokal' },
+];
 
-  const heroTrack = catalog[0] || currentTrack;
-  const quickPicks = catalog.slice(0, 6);
-  const recommended = catalog.slice(2, 12);
+export default function Home() {
+  const {
+    catalog,
+    fullCatalog,
+    popCatalog,
+    localTracks,
+    catalogLoading,
+    recentTracks,
+    playlists,
+    playTrack,
+    currentTrack,
+  } = useAudio();
+  const { settings } = useTheme();
+  const [filter, setFilter] = useState('all');
+
+  const activeList =
+    filter === 'full'
+      ? fullCatalog
+      : filter === 'pop'
+      ? popCatalog
+      : filter === 'local'
+      ? localTracks
+      : catalog;
+
+  const heroTrack = fullCatalog[0] || catalog[0] || currentTrack;
+  const quickPicks = (activeList.length > 0 ? activeList : catalog).slice(0, 6);
 
   return (
-    <div className="space-y-7 pb-4">
+    <div className="space-y-6 pb-6">
+      <div data-no-tab-swipe className="flex items-center gap-2 overflow-x-auto no-scrollbar py-1">
+        {MOOD_FILTERS.map((m) => {
+          const active = filter === m.id;
+          return (
+            <button
+              key={m.id}
+              type="button"
+              onClick={() => setFilter(m.id)}
+              className={`px-4 py-1.5 rounded-full text-xs font-semibold shrink-0 transition ${
+                active ? 'text-zinc-950 shadow-md' : 'glass-card text-main opacity-80 hover:opacity-100'
+              }`}
+              style={active ? { backgroundColor: settings.accentColor } : undefined}
+            >
+              {m.label}
+            </button>
+          );
+        })}
+      </div>
+
       <section>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-2.5">
           {catalogLoading
@@ -24,7 +69,7 @@ export default function Home() {
                 <button
                   key={track.id}
                   type="button"
-                  onClick={() => playTrack(track, catalog)}
+                  onClick={() => playTrack(track, activeList)}
                   className="glass-card rounded-xl overflow-hidden flex items-center gap-2.5 pr-2.5 hover:scale-[1.02] active:scale-[0.98] transition text-left"
                 >
                   <img
@@ -33,12 +78,10 @@ export default function Home() {
                     className="w-14 h-14 object-cover shrink-0 bg-zinc-800"
                   />
                   <div className="min-w-0 flex-1">
-                    <p className={`text-xs sm:text-sm font-semibold truncate ${isLightMode ? 'text-slate-900' : 'text-white'}`}>
+                    <p className="text-xs sm:text-sm font-semibold truncate text-main">
                       {track.title}
                     </p>
-                    <p className={`text-[11px] truncate opacity-70 ${isLightMode ? 'text-slate-700' : 'text-white'}`}>
-                      {track.artist}
-                    </p>
+                    <p className="text-[11px] truncate text-muted">{track.artist}</p>
                   </div>
                 </button>
               ))}
@@ -51,11 +94,11 @@ export default function Home() {
             onClick={() => playTrack(heroTrack, catalog)}
             className="bubble-glass rounded-3xl p-5 sm:p-6 relative overflow-hidden cursor-pointer group"
             style={{
-              boxShadow: `0 20px 50px -18px ${settings.accentColor}99`,
+              boxShadow: `0 18px 46px -18px ${settings.accentColor}99`,
             }}
           >
             <div
-              className="absolute -right-12 -top-12 w-56 h-56 rounded-full blur-[70px] opacity-40 pointer-events-none"
+              className="absolute -right-12 -top-12 w-56 h-56 rounded-full blur-[70px] opacity-35 pointer-events-none"
               style={{ backgroundColor: settings.accentColor }}
             />
             <div className="relative flex flex-col sm:flex-row items-start sm:items-center gap-5">
@@ -69,12 +112,13 @@ export default function Home() {
                   className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider px-3 py-1 rounded-full mb-2 text-zinc-950"
                   style={{ backgroundColor: settings.accentColor }}
                 >
-                  <Sparkles className="w-3.5 h-3.5" /> Lagu Pilihan Utama
+                  <Sparkles className="w-3.5 h-3.5" />
+                  {heroTrack.isFullTrack ? 'Full Track Pilihan' : 'Lagu Pilihan Utama'}
                 </span>
-                <h2 className={`text-xl sm:text-2xl font-heading font-extrabold truncate ${isLightMode ? 'text-slate-900' : 'text-white'}`}>
+                <h2 className="text-xl sm:text-2xl font-heading font-extrabold truncate text-main">
                   {heroTrack.title}
                 </h2>
-                <p className={`text-sm opacity-75 mb-4 truncate ${isLightMode ? 'text-slate-700' : 'text-white'}`}>
+                <p className="text-sm text-muted mb-4 truncate">
                   {heroTrack.artist} • {heroTrack.album}
                 </p>
                 <span
@@ -91,9 +135,7 @@ export default function Home() {
 
       {recentTracks.length > 0 && (
         <section>
-          <h3 className={`text-lg font-heading font-bold mb-3 ${isLightMode ? 'text-slate-900' : 'text-white'}`}>
-            Baru Diputar
-          </h3>
+          <h3 className="text-lg font-heading font-bold mb-3 text-main">Baru Diputar</h3>
           <div data-no-tab-swipe className="flex gap-3.5 overflow-x-auto no-scrollbar pb-2">
             {recentTracks.map((track, idx) => (
               <div key={track.id} className="w-36 sm:w-44 shrink-0">
@@ -104,23 +146,53 @@ export default function Home() {
         </section>
       )}
 
-      <section>
-        <h3 className={`text-lg font-heading font-bold mb-3 ${isLightMode ? 'text-slate-900' : 'text-white'}`}>
-          Rekomendasi Untukmu
-        </h3>
-        <div data-no-tab-swipe className="flex gap-3.5 overflow-x-auto no-scrollbar pb-2">
-          {recommended.map((track, idx) => (
-            <div key={track.id} className="w-36 sm:w-44 shrink-0">
-              <SongCard track={track} queueList={catalog} index={idx} />
+      {(filter === 'all' || filter === 'full') && fullCatalog.length > 0 && (
+        <section>
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="text-lg font-heading font-bold text-main flex items-center gap-2">
+              <Flame className="w-5 h-5" style={{ color: settings.accentColor }} />
+              Lagu Full Durasi (Gratis)
+            </h3>
+          </div>
+          <div data-no-tab-swipe className="flex gap-3.5 overflow-x-auto no-scrollbar pb-2">
+            {fullCatalog.map((track, idx) => (
+              <div key={track.id} className="w-36 sm:w-44 shrink-0">
+                <SongCard track={track} queueList={fullCatalog} index={idx} />
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
+      {(filter === 'all' || filter === 'pop') && popCatalog.length > 0 && (
+        <section>
+          <h3 className="text-lg font-heading font-bold mb-3 text-main">
+            Top Pop Indonesia & Global
+          </h3>
+          <div className="space-y-2.5">
+            {popCatalog.map((track, idx) => (
+              <SongCard key={track.id} track={track} queueList={popCatalog} layout="row" index={idx} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {filter === 'local' && (
+        <section className="space-y-2.5">
+          {localTracks.length === 0 ? (
+            <div className="glass-card rounded-3xl p-6 text-center text-sm text-muted">
+              Belum ada lagu MP3/FLAC lokal. Tambahkan lewat tab Search!
             </div>
-          ))}
-        </div>
-      </section>
+          ) : (
+            localTracks.map((track, idx) => (
+              <SongCard key={track.id} track={track} queueList={localTracks} layout="row" index={idx} />
+            ))
+          )}
+        </section>
+      )}
 
       <section>
-        <h3 className={`text-lg font-heading font-bold mb-3 ${isLightMode ? 'text-slate-900' : 'text-white'}`}>
-          Playlist Populer
-        </h3>
+        <h3 className="text-lg font-heading font-bold mb-3 text-main">Playlist Populer</h3>
         <div data-no-tab-swipe className="flex gap-3.5 overflow-x-auto no-scrollbar pb-2">
           {playlists.length > 0 ? (
             playlists.map((pl) => (
@@ -130,24 +202,22 @@ export default function Home() {
                 onClick={() => pl.tracks[0] && playTrack(pl.tracks[0], pl.tracks)}
                 className="glass-card w-44 shrink-0 rounded-2xl p-3 text-left hover:scale-[1.02] transition"
               >
-                <div className="aspect-square rounded-xl bg-white/10 flex items-center justify-center mb-2.5 overflow-hidden">
+                <div className="aspect-square rounded-xl glass-subtle flex items-center justify-center mb-2.5 overflow-hidden">
                   {pl.tracks[0]?.cover ? (
                     <img src={pl.tracks[0].cover} alt={pl.name} className="w-full h-full object-cover" />
                   ) : (
-                    <Disc3 className="w-10 h-10 opacity-60" />
+                    <Disc3 className="w-10 h-10 text-muted" />
                   )}
                 </div>
-                <p className={`text-sm font-semibold truncate ${isLightMode ? 'text-slate-900' : 'text-white'}`}>
-                  {pl.name}
-                </p>
-                <p className="text-xs opacity-65">{pl.tracks.length} lagu</p>
+                <p className="text-sm font-semibold truncate text-main">{pl.name}</p>
+                <p className="text-xs text-muted">{pl.tracks.length} lagu</p>
               </button>
             ))
           ) : (
             [
-              { title: 'Hits Indonesia Kini', query: catalog.slice(0, 4) },
-              { title: 'Chill Night Drive', query: catalog.slice(4, 8) },
-              { title: 'Global Top Pop', query: catalog.slice(6, 12) },
+              { title: 'Full Track Trending', query: fullCatalog.slice(0, 4) },
+              { title: 'Indo Pop Hits', query: popCatalog.slice(0, 4) },
+              { title: 'Global Chill Mix', query: popCatalog.slice(4, 8) },
             ].map((mix, idx) => (
               <button
                 key={idx}
@@ -155,15 +225,13 @@ export default function Home() {
                 onClick={() => mix.query[0] && playTrack(mix.query[0], mix.query)}
                 className="glass-card w-44 shrink-0 rounded-2xl p-3 text-left hover:scale-[1.02] transition"
               >
-                <div className="aspect-square rounded-xl bg-white/10 overflow-hidden mb-2.5 grid grid-cols-2 gap-0.5">
+                <div className="aspect-square rounded-xl glass-subtle overflow-hidden mb-2.5 grid grid-cols-2 gap-0.5">
                   {mix.query.slice(0, 4).map((t) => (
                     <img key={t.id} src={t.cover} alt={t.title} className="w-full h-full object-cover" />
                   ))}
                 </div>
-                <p className={`text-sm font-semibold truncate ${isLightMode ? 'text-slate-900' : 'text-white'}`}>
-                  {mix.title}
-                </p>
-                <p className="text-xs opacity-65">{mix.query.length} lagu pilihan</p>
+                <p className="text-sm font-semibold truncate text-main">{mix.title}</p>
+                <p className="text-xs text-muted">{mix.query.length} lagu pilihan</p>
               </button>
             ))
           )}

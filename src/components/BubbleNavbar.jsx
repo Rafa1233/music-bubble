@@ -10,15 +10,16 @@ const TABS = [
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
 
-export default function BubbleNavbar({ activeTab, onChangeTab }) {
-  const { settings, isLightMode } = useTheme();
+export default function BubbleNavbar({ activeTab, onChangeTab, swipeProgress = 0 }) {
+  const { settings } = useTheme();
+  const isSwiping = Math.abs(swipeProgress) > 0.03;
 
   return (
     <nav
       aria-label="Navigasi Utama"
       className="fixed bottom-4 inset-x-0 z-40 flex justify-center px-4 pointer-events-none"
     >
-      <div className="bubble-glass pointer-events-auto rounded-full p-1.5 flex items-center gap-1 max-w-md w-full justify-between">
+      <div className="bubble-glass gpu-layer pointer-events-auto rounded-full p-1.5 flex items-center gap-1 max-w-md w-full justify-between relative overflow-hidden">
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -27,47 +28,42 @@ export default function BubbleNavbar({ activeTab, onChangeTab }) {
               key={tab.id}
               type="button"
               onClick={() => onChangeTab(tab.id)}
-              whileTap={{ scale: 1.08 }}
+              whileTap={{ scale: 1.06 }}
               className="relative flex-1 py-2 px-3 rounded-full flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-colors z-10"
             >
               {isActive && (
                 <motion.span
-                  layoutId="liquid-bubble-pill"
-                  transition={{ type: 'spring', stiffness: 350, damping: 30 }}
-                  className="absolute inset-0 rounded-full -z-10"
+                  layoutId="ios-liquid-bubble"
+                  animate={{
+                    scaleX: isSwiping ? 1.18 : 1,
+                    scaleY: isSwiping ? 0.92 : 1,
+                    x: swipeProgress * -24,
+                  }}
+                  transition={{ type: 'spring', stiffness: 420, damping: 28, mass: 0.75 }}
+                  className="absolute inset-0 rounded-full -z-10 gpu-layer"
                   style={{
-                    background: `linear-gradient(135deg, ${settings.accentColor}44, ${settings.accentColor}22)`,
-                    border: `1px solid ${settings.accentColor}77`,
-                    boxShadow: `0 0 20px -4px ${settings.accentColor}88, inset 0 1px 1px rgba(255,255,255,0.35)`,
+                    background: `linear-gradient(135deg, ${settings.accentColor}4d, ${settings.accentColor}24)`,
+                    border: `1px solid ${settings.accentColor}88`,
+                    boxShadow: `0 6px 24px -4px ${settings.accentColor}99, inset 0 1.5px 2px rgba(255,255,255,0.55), inset 0 -1px 2px rgba(0,0,0,0.2)`,
                   }}
                 />
               )}
 
               <motion.div
                 animate={{ scale: isActive ? 1.12 : 1 }}
-                transition={{ type: 'spring', stiffness: 350, damping: 24 }}
+                transition={{ type: 'spring', stiffness: 380, damping: 24 }}
               >
                 <Icon
                   className="w-5 h-5"
                   style={{
-                    color: isActive
-                      ? settings.accentColor
-                      : isLightMode
-                      ? 'rgba(15,23,42,0.72)'
-                      : 'rgba(255,255,255,0.75)',
+                    color: isActive ? settings.accentColor : 'var(--text-secondary)',
                   }}
                 />
               </motion.div>
 
               <span
                 className={`text-[11px] sm:text-xs font-semibold ${
-                  isActive
-                    ? isLightMode
-                      ? 'text-slate-900'
-                      : 'text-white'
-                    : isLightMode
-                    ? 'text-slate-700/80'
-                    : 'text-white/70'
+                  isActive ? 'text-main' : 'text-muted'
                 }`}
               >
                 {tab.label}
