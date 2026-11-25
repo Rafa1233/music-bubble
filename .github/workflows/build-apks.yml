@@ -58,12 +58,6 @@ jobs:
           cp android/app/build/outputs/apk/android15Plus/debug/*.apk release-apks/AuraSound-Android-15-16-Plus.apk
           cp android/app/build/outputs/apk/android10Plus/debug/*.apk release-apks/AuraSound-Android-10-to-14.apk
 
-      - name: Upload APKs to Workflow Artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: AuraSound-Dual-APKs
-          path: release-apks/*.apk
-
       - name: Publish APKs to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
@@ -78,3 +72,11 @@ jobs:
             release-apks/AuraSound-Android-10-to-14.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload APKs to Workflow Artifacts
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: AuraSound-Dual-APKs
+          path: release-apks/*.apk
+          retention-days: 7
