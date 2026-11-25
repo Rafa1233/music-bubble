@@ -1,4 +1,4 @@
-import { AUDIO_STATUS } from './TrackNormalizer';
+import { AUDIO_STATUS } from './TrackNormalizer.js';
 
 export function resolveTrackPlayback(track) {
   if (!track) {

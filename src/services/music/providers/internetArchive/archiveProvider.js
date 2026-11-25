@@ -1,4 +1,4 @@
-import { AUDIO_STATUS, normalizeTrack } from '../../TrackNormalizer';
+import { AUDIO_STATUS, normalizeTrack } from '../../TrackNormalizer.js';
 
 const IA_SEARCH = 'https://archive.org/advancedsearch.php';
 

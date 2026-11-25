@@ -1,4 +1,4 @@
-import { AUDIO_STATUS, normalizeTrack } from '../../TrackNormalizer';
+import { AUDIO_STATUS, normalizeTrack } from '../../TrackNormalizer.js';
 
 const AUDIUS_DISCOVERY_API = 'https://api.audius.co';
 const FALLBACK_HOSTS = [
