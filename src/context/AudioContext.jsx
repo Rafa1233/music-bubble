@@ -1,7 +1,13 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
-import { fetchCuratedCatalog, fetchTrackLyrics } from '../services/musicApi';
+import {
+  fetchCuratedCatalog,
+  fetchTrackLyrics,
+  getBackupAudiusUrl,
+  searchLyricsManual,
+} from '../services/musicApi';
 import { extractDominantColor } from '../utils/colorExtractor';
 import { saveBlobToIDB, getBlobFromIDB, deleteBlobFromIDB } from '../utils/idbStorage';
+import { ensureMusicFxGraph, applyMusicFxSettings } from '../utils/audioFxEngine';
 import {
   subscribeAuth,
   signInWithGoogle,
@@ -15,9 +21,23 @@ const AudioContext = createContext(null);
 const LIB_STORAGE_KEY = 'aurasound_library_v2';
 const LOCAL_TRACKS_KEY = 'aurasound_local_tracks_meta_v2';
 
+const DEFAULT_FX = {
+  preset: 'normal',
+  speed: 1,
+  preservesPitch: true,
+  bassBoost: 0,
+  trebleBoost: 0,
+  reverb: 0,
+  echo: 0,
+  vocalCut: false,
+};
+
 export function AudioProvider({ children }) {
-  const audioRef = useRef(null);
+  const corsAudioRef = useRef(null);
+  const plainAudioRef = useRef(null);
+  const activeEngineRef = useRef('plain');
   const playSeqRef = useRef(0);
+  const retriedTrackRef = useRef(null);
 
   const [catalog, setCatalog] = useState([]);
   const [fullCatalog, setFullCatalog] = useState([]);
@@ -35,6 +55,7 @@ export function AudioProvider({ children }) {
   const [volume, setVolume] = useState(0.85);
   const [shuffle, setShuffle] = useState(false);
   const [repeatMode, setRepeatMode] = useState('off');
+  const [audioFx, setAudioFx] = useState(DEFAULT_FX);
 
   const [isFullPlayerOpen, setIsFullPlayerOpen] = useState(false);
   const [dominantColor, setDominantColor] = useState('#10b981');
@@ -53,7 +74,11 @@ export function AudioProvider({ children }) {
   const [localTracks, setLocalTracks] = useState([]);
 
   const stateRef = useRef({});
-  stateRef.current = { queue, currentTrack, shuffle, repeatMode };
+  stateRef.current = { queue, currentTrack, shuffle, repeatMode, volume, audioFx };
+
+  const getActiveAudio = useCallback(() => {
+    return activeEngineRef.current === 'cors' ? corsAudioRef.current : plainAudioRef.current;
+  }, []);
 
   useEffect(() => {
     try {
@@ -77,7 +102,7 @@ export function AudioProvider({ children }) {
           if (blob) {
             const url = URL.createObjectURL(blob);
             createdUrls.push(url);
-            restored.push({ ...item, isFullTrack: true, audioUrl: url });
+            restored.push({ ...item, isFullTrack: true, corsSafe: true, audioUrl: url });
           }
         }
         setLocalTracks(restored);
@@ -98,9 +123,7 @@ export function AudioProvider({ children }) {
     } catch {
       // ignore
     }
-    if (user?.uid) {
-      saveUserLibraryToCloud(user.uid, payload);
-    }
+    if (user?.uid) saveUserLibraryToCloud(user.uid, payload);
   }, [likedSongs, playlists, recentTracks, user]);
 
   useEffect(() => {
@@ -166,56 +189,108 @@ export function AudioProvider({ children }) {
     };
   }, [currentTrack?.id]);
 
-  const playTrack = useCallback(
-    async (track, customQueue = null) => {
-      if (!track || !track.audioUrl) {
-        setAudioError('Sumber audio tidak tersedia.');
-        return;
+  // Sinkronisasi Speed, Pitch, & Efek Web Audio secara real-time
+  useEffect(() => {
+    [corsAudioRef.current, plainAudioRef.current].forEach((el) => {
+      if (!el) return;
+      el.playbackRate = Number(audioFx.speed || 1);
+      if ('preservesPitch' in el) el.preservesPitch = Boolean(audioFx.preservesPitch);
+    });
+    if (corsAudioRef.current) {
+      applyMusicFxSettings(corsAudioRef.current, audioFx);
+    }
+  }, [audioFx]);
+
+  const updateFx = useCallback((patch) => {
+    setAudioFx((prev) => ({ ...prev, preset: 'custom', ...patch }));
+  }, []);
+
+  const applyFxPreset = useCallback((preset) => {
+    const map = {
+      normal: DEFAULT_FX,
+      bass: { ...DEFAULT_FX, preset: 'bass', bassBoost: 11, trebleBoost: 3 },
+      concert: { ...DEFAULT_FX, preset: 'concert', reverb: 0.48, bassBoost: 4 },
+      slowed: {
+        ...DEFAULT_FX,
+        preset: 'slowed',
+        speed: 0.84,
+        preservesPitch: false,
+        reverb: 0.55,
+      },
+      nightcore: {
+        ...DEFAULT_FX,
+        preset: 'nightcore',
+        speed: 1.22,
+        preservesPitch: false,
+        trebleBoost: 4,
+      },
+      karaoke: { ...DEFAULT_FX, preset: 'karaoke', vocalCut: true, echo: 0.18 },
+    };
+    setAudioFx(map[preset] || DEFAULT_FX);
+  }, []);
+
+  const playTrack = useCallback(async (track, customQueue = null, forcePlain = false) => {
+    if (!track || !track.audioUrl) {
+      setAudioError('Sumber audio tidak tersedia.');
+      return;
+    }
+
+    const useCors = Boolean(track.corsSafe) && !forcePlain;
+    const targetAudio = useCors ? corsAudioRef.current : plainAudioRef.current;
+    const otherAudio = useCors ? plainAudioRef.current : corsAudioRef.current;
+    if (!targetAudio) return;
+
+    if (otherAudio) otherAudio.pause();
+    activeEngineRef.current = useCors ? 'cors' : 'plain';
+
+    if (useCors) {
+      ensureMusicFxGraph(targetAudio);
+      applyMusicFxSettings(targetAudio, stateRef.current.audioFx);
+    }
+
+    const seq = ++playSeqRef.current;
+    retriedTrackRef.current = null;
+    setAudioError('');
+    setIsBuffering(true);
+
+    if (Array.isArray(customQueue) && customQueue.length > 0) {
+      setQueue(customQueue);
+    } else {
+      setQueue((prev) => (prev.some((t) => t.id === track.id) ? prev : [track, ...prev]));
+    }
+
+    setCurrentTrack(track);
+    setRecentTracks((prev) => [track, ...prev.filter((t) => t.id !== track.id)].slice(0, 20));
+
+    try {
+      if (targetAudio.error || targetAudio.src !== track.audioUrl) {
+        targetAudio.pause();
+        targetAudio.src = track.audioUrl;
+        targetAudio.load();
       }
-
-      const audio = audioRef.current;
-      if (!audio) return;
-
-      const seq = ++playSeqRef.current;
-      setAudioError('');
-      setIsBuffering(true);
-
-      if (Array.isArray(customQueue) && customQueue.length > 0) {
-        setQueue(customQueue);
-      } else {
-        setQueue((prev) => (prev.some((t) => t.id === track.id) ? prev : [track, ...prev]));
+      targetAudio.volume = stateRef.current.volume;
+      targetAudio.playbackRate = Number(stateRef.current.audioFx.speed || 1);
+      if ('preservesPitch' in targetAudio) {
+        targetAudio.preservesPitch = Boolean(stateRef.current.audioFx.preservesPitch);
       }
-
-      setCurrentTrack(track);
-      setRecentTracks((prev) => [track, ...prev.filter((t) => t.id !== track.id)].slice(0, 20));
-
-      try {
-        if (audio.error || audio.src !== track.audioUrl) {
-          audio.pause();
-          audio.src = track.audioUrl;
-          audio.load();
-        }
-        audio.volume = volume;
-        await audio.play();
-        if (playSeqRef.current === seq) {
-          setIsPlaying(true);
-          setIsBuffering(false);
-        }
-      } catch (err) {
-        if (playSeqRef.current === seq) {
-          setIsPlaying(false);
-          setIsBuffering(false);
-          if (err?.name !== 'AbortError') {
-            setAudioError('Ketuk tombol Play untuk memulai pemutaran.');
-          }
+      await targetAudio.play();
+      if (playSeqRef.current === seq) {
+        setIsPlaying(true);
+        setIsBuffering(false);
+      }
+    } catch (err) {
+      if (playSeqRef.current === seq) {
+        setIsPlaying(false);
+        setIsBuffering(false);
+        if (err?.name !== 'AbortError') {
+          setAudioError('Ketuk tombol Play atau coba lagu lainnya.');
         }
       }
-    },
-    [volume]
-  );
+    }
+  }, []);
 
   const togglePlay = useCallback(async () => {
-    const audio = audioRef.current;
+    const audio = getActiveAudio();
     if (!audio || !currentTrack) return;
 
     if (audio.error || !audio.src || audio.src !== currentTrack.audioUrl) {
@@ -225,6 +300,7 @@ export function AudioProvider({ children }) {
 
     if (audio.paused) {
       try {
+        if (activeEngineRef.current === 'cors') ensureMusicFxGraph(audio);
         setAudioError('');
         await audio.play();
         setIsPlaying(true);
@@ -235,7 +311,7 @@ export function AudioProvider({ children }) {
       audio.pause();
       setIsPlaying(false);
     }
-  }, [currentTrack, playTrack]);
+  }, [currentTrack, getActiveAudio, playTrack]);
 
   const nextTrack = useCallback(() => {
     const { queue: q, currentTrack: curr, shuffle: isShuffle } = stateRef.current;
@@ -252,7 +328,7 @@ export function AudioProvider({ children }) {
   }, [playTrack]);
 
   const prevTrack = useCallback(() => {
-    const audio = audioRef.current;
+    const audio = getActiveAudio();
     if (audio && audio.currentTime > 3) {
       audio.currentTime = 0;
       return;
@@ -262,20 +338,35 @@ export function AudioProvider({ children }) {
     const idx = q.findIndex((t) => t.id === curr?.id);
     const prevIdx = idx <= 0 ? q.length - 1 : idx - 1;
     playTrack(q[prevIdx]);
-  }, [playTrack]);
+  }, [getActiveAudio, playTrack]);
 
-  const seekTo = useCallback((timeSec) => {
-    const audio = audioRef.current;
-    if (!audio || Number.isNaN(timeSec)) return;
-    const clamped = Math.max(0, Math.min(timeSec, audio.duration || timeSec));
-    audio.currentTime = clamped;
-    setCurrentTime(clamped);
-  }, []);
+  const seekTo = useCallback(
+    (timeSec, autoPlay = false) => {
+      const audio = getActiveAudio();
+      const curr = stateRef.current.currentTrack;
+      if (!audio || Number.isNaN(timeSec)) return;
+
+      const maxDur = audio.duration || curr?.duration || 30;
+      const safeLimit = curr && !curr.isFullTrack && maxDur <= 35 ? Math.max(0, maxDur - 1) : maxDur;
+      const clamped = Math.max(0, Math.min(timeSec, safeLimit));
+      try {
+        audio.currentTime = clamped;
+        setCurrentTime(clamped);
+        if (autoPlay && audio.paused) {
+          audio.play().then(() => setIsPlaying(true)).catch(() => {});
+        }
+      } catch {
+        // abaikan jika audio belum siap
+      }
+    },
+    [getActiveAudio]
+  );
 
   const changeVolume = useCallback((val) => {
     const v = Math.max(0, Math.min(1, val));
     setVolume(v);
-    if (audioRef.current) audioRef.current.volume = v;
+    if (corsAudioRef.current) corsAudioRef.current.volume = v;
+    if (plainAudioRef.current) plainAudioRef.current.volume = v;
   }, []);
 
   const cycleRepeat = useCallback(() => {
@@ -283,65 +374,94 @@ export function AudioProvider({ children }) {
   }, []);
 
   useEffect(() => {
-    const audio = new Audio();
-    audio.preload = 'metadata';
-    audioRef.current = audio;
+    const corsAudio = new Audio();
+    corsAudio.crossOrigin = 'anonymous';
+    corsAudio.preload = 'metadata';
 
-    const onTimeUpdate = () => setCurrentTime(audio.currentTime || 0);
-    const onLoadedMetadata = () => setDuration(audio.duration || 0);
-    const onPlay = () => {
-      setIsPlaying(true);
-      setIsBuffering(false);
-    };
-    const onPause = () => setIsPlaying(false);
-    const onWaiting = () => setIsBuffering(true);
-    const onCanPlay = () => setIsBuffering(false);
-    const onError = () => {
-      setIsPlaying(false);
-      setIsBuffering(false);
-      setAudioError('Stream audio gagal dimuat. Coba lagu lain.');
-    };
-    const onEnded = () => {
-      const { repeatMode: rep, queue: q, currentTrack: curr } = stateRef.current;
-      if (rep === 'one') {
-        audio.currentTime = 0;
-        audio.play().catch(() => {});
-        return;
-      }
-      const idx = q.findIndex((t) => t.id === curr?.id);
-      const isLast = idx === q.length - 1;
-      if (rep === 'off' && isLast && !stateRef.current.shuffle) {
+    const plainAudio = new Audio();
+    plainAudio.preload = 'metadata';
+
+    corsAudioRef.current = corsAudio;
+    plainAudioRef.current = plainAudio;
+
+    const bind = (audio, engineName) => {
+      const isMine = () => activeEngineRef.current === engineName;
+
+      const onTimeUpdate = () => isMine() && setCurrentTime(audio.currentTime || 0);
+      const onLoaded = () => isMine() && setDuration(audio.duration || 0);
+      const onPlay = () => {
+        if (isMine()) {
+          setIsPlaying(true);
+          setIsBuffering(false);
+        }
+      };
+      const onPause = () => isMine() && setIsPlaying(false);
+      const onWaiting = () => isMine() && setIsBuffering(true);
+      const onCanPlay = () => isMine() && setIsBuffering(false);
+      const onError = async () => {
+        if (!isMine()) return;
+        const curr = stateRef.current.currentTrack;
+        if (curr?.source === 'audius' && retriedTrackRef.current !== curr.id) {
+          retriedTrackRef.current = curr.id;
+          const backupUrl = await getBackupAudiusUrl(curr);
+          if (backupUrl) {
+            playTrack({ ...curr, audioUrl: backupUrl }, null, engineName === 'cors');
+            return;
+          }
+        }
         setIsPlaying(false);
-        return;
-      }
-      nextTrack();
+        setIsBuffering(false);
+        setAudioError('Stream audio gagal dimuat. Coba lagu lainnya.');
+      };
+      const onEnded = () => {
+        if (!isMine()) return;
+        const { repeatMode: rep, queue: q, currentTrack: curr } = stateRef.current;
+        if (rep === 'one') {
+          audio.currentTime = 0;
+          audio.play().catch(() => {});
+          return;
+        }
+        const idx = q.findIndex((t) => t.id === curr?.id);
+        const isLast = idx === q.length - 1;
+        if (rep === 'off' && isLast && !stateRef.current.shuffle) {
+          setIsPlaying(false);
+          return;
+        }
+        nextTrack();
+      };
+
+      audio.addEventListener('timeupdate', onTimeUpdate);
+      audio.addEventListener('loadedmetadata', onLoaded);
+      audio.addEventListener('play', onPlay);
+      audio.addEventListener('pause', onPause);
+      audio.addEventListener('waiting', onWaiting);
+      audio.addEventListener('canplay', onCanPlay);
+      audio.addEventListener('error', onError);
+      audio.addEventListener('ended', onEnded);
+
+      return () => {
+        audio.pause();
+        audio.removeEventListener('timeupdate', onTimeUpdate);
+        audio.removeEventListener('loadedmetadata', onLoaded);
+        audio.removeEventListener('play', onPlay);
+        audio.removeEventListener('pause', onPause);
+        audio.removeEventListener('waiting', onWaiting);
+        audio.removeEventListener('canplay', onCanPlay);
+        audio.removeEventListener('error', onError);
+        audio.removeEventListener('ended', onEnded);
+      };
     };
 
-    audio.addEventListener('timeupdate', onTimeUpdate);
-    audio.addEventListener('loadedmetadata', onLoadedMetadata);
-    audio.addEventListener('play', onPlay);
-    audio.addEventListener('pause', onPause);
-    audio.addEventListener('waiting', onWaiting);
-    audio.addEventListener('canplay', onCanPlay);
-    audio.addEventListener('error', onError);
-    audio.addEventListener('ended', onEnded);
-
+    const unbindCors = bind(corsAudio, 'cors');
+    const unbindPlain = bind(plainAudio, 'plain');
     return () => {
-      audio.pause();
-      audio.removeEventListener('timeupdate', onTimeUpdate);
-      audio.removeEventListener('loadedmetadata', onLoadedMetadata);
-      audio.removeEventListener('play', onPlay);
-      audio.removeEventListener('pause', onPause);
-      audio.removeEventListener('waiting', onWaiting);
-      audio.removeEventListener('canplay', onCanPlay);
-      audio.removeEventListener('error', onError);
-      audio.removeEventListener('ended', onEnded);
+      unbindCors();
+      unbindPlain();
     };
-  }, [nextTrack]);
+  }, [nextTrack, playTrack]);
 
   useEffect(() => {
     if (!('mediaSession' in navigator) || !currentTrack) return;
-
     const artwork = currentTrack.cover
       ? [
           { src: currentTrack.cover, sizes: '96x96', type: 'image/jpeg' },
@@ -356,7 +476,6 @@ export function AudioProvider({ children }) {
       album: currentTrack.album || 'AuraSound',
       artwork,
     });
-
     navigator.mediaSession.playbackState = isPlaying ? 'playing' : 'paused';
 
     const handlers = [
@@ -366,7 +485,6 @@ export function AudioProvider({ children }) {
       ['nexttrack', () => nextTrack()],
       ['seekto', (details) => details?.seekTime != null && seekTo(details.seekTime)],
     ];
-
     handlers.forEach(([action, fn]) => {
       try {
         navigator.mediaSession.setActionHandler(action, fn);
@@ -381,14 +499,25 @@ export function AudioProvider({ children }) {
       try {
         navigator.mediaSession.setPositionState({
           duration,
-          playbackRate: 1,
+          playbackRate: Number(audioFx.speed || 1),
           position: Math.min(currentTime, duration),
         });
       } catch {
         // abaikan
       }
     }
-  }, [currentTime, duration]);
+  }, [currentTime, duration, audioFx.speed]);
+
+  const applyManualLyrics = useCallback((item) => {
+    if (!item) return;
+    setLyricsOffset(0);
+    setLyricsData({
+      synced: item.synced || [],
+      plain: item.plain || null,
+      matchedTitle: item.matchedTitle || `${item.artist} — ${item.title}`,
+      loading: false,
+    });
+  }, []);
 
   const isLiked = useCallback(
     (trackId) => likedSongs.some((t) => t.id === trackId),
@@ -443,7 +572,7 @@ export function AudioProvider({ children }) {
 
   const uploadLocalAudioFiles = useCallback(async (fileList) => {
     const files = Array.from(fileList || []).filter((f) =>
-      f.type.startsWith('audio/') || /\.(mp3|wav|ogg|flac|m4a|aac)$/i.test(f.name)
+      f.type.startsWith('audio/') || /\.(mp3|wav|ogg|flac|m4a|aac|webm)$/i.test(f.name)
     );
     if (files.length === 0) return [];
 
@@ -466,6 +595,7 @@ export function AudioProvider({ children }) {
         cover: '',
         duration: 0,
         isFullTrack: true,
+        corsSafe: true,
         source: 'local',
         genre: 'Lokal',
       };
@@ -500,13 +630,8 @@ export function AudioProvider({ children }) {
     });
   }, []);
 
-  const loginGoogle = useCallback(async () => {
-    return await signInWithGoogle();
-  }, []);
-
-  const logoutGoogle = useCallback(async () => {
-    await signOutUser();
-  }, []);
+  const loginGoogle = useCallback(async () => await signInWithGoogle(), []);
+  const logoutGoogle = useCallback(async () => await signOutUser(), []);
 
   return (
     <AudioContext.Provider
@@ -525,6 +650,7 @@ export function AudioProvider({ children }) {
         volume,
         shuffle,
         repeatMode,
+        audioFx,
         isFullPlayerOpen,
         dominantColor,
         lyricsData,
@@ -537,6 +663,10 @@ export function AudioProvider({ children }) {
         setIsFullPlayerOpen,
         setLyricsOffset,
         setShuffle,
+        updateFx,
+        applyFxPreset,
+        searchLyricsManual,
+        applyManualLyrics,
         playTrack,
         togglePlay,
         nextTrack,

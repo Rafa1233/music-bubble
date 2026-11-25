@@ -1,7 +1,6 @@
 import fs from 'fs';
 import path from 'path';
 
-// 1. Update variables.gradle agar mendukung Android 15/16 (API 35 & 36)
 const varsPath = path.join('android', 'variables.gradle');
 if (fs.existsSync(varsPath)) {
   let vars = fs.readFileSync(varsPath, 'utf8');
@@ -11,7 +10,6 @@ if (fs.existsSync(varsPath)) {
   fs.writeFileSync(varsPath, vars);
 }
 
-// 2. Tambahkan Product Flavors terpisah di android/app/build.gradle
 const appGradlePath = path.join('android', 'app', 'build.gradle');
 if (fs.existsSync(appGradlePath)) {
   let gradle = fs.readFileSync(appGradlePath, 'utf8');
@@ -40,7 +38,6 @@ if (fs.existsSync(appGradlePath)) {
   }
 }
 
-// 3. Hardware Acceleration, LargeHeap & Izin Audio Latar di AndroidManifest.xml
 const manifestPath = path.join('android', 'app', 'src', 'main', 'AndroidManifest.xml');
 if (fs.existsSync(manifestPath)) {
   let manifest = fs.readFileSync(manifestPath, 'utf8');
@@ -54,6 +51,8 @@ if (fs.existsSync(manifestPath)) {
     'android.permission.WAKE_LOCK',
     'android.permission.FOREGROUND_SERVICE',
     'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
+    'android.permission.RECORD_AUDIO',
+    'android.permission.MODIFY_AUDIO_SETTINGS',
   ];
   for (const p of perms) {
     if (!manifest.includes(p)) {
@@ -66,7 +65,6 @@ if (fs.existsSync(manifestPath)) {
   fs.writeFileSync(manifestPath, manifest);
 }
 
-// 4. MainActivity.java dengan dukungan 120Hz Refresh Rate (120 FPS) & Media Playback Lancar
 const mainActivityPath = path.join(
   'android',
   'app',
@@ -127,4 +125,4 @@ public class MainActivity extends BridgeActivity {
 `
 );
 
-console.log('Android patch 120Hz & dual flavors selesai');
+console.log('Android patch 120Hz, mic permission & dual flavors selesai');

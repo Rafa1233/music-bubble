@@ -1,13 +1,17 @@
 const ITUNES_BASE = 'https://itunes.apple.com/search';
 const LRCLIB_BASE = 'https://lrclib.net/api';
 const AUDIUS_DISCOVERY_LIST = 'https://api.audius.co';
-const AUDIUS_FALLBACK_HOST = 'https://discoveryprovider.audius.co';
+const FALLBACK_AUDIUS_HOSTS = [
+  'https://discoveryprovider.audius.co',
+  'https://discoveryprovider2.audius.co',
+  'https://discoveryprovider3.audius.co',
+];
 const APP_NAME = 'AuraSound';
 
-let cachedAudiusHost = null;
+let cachedAudiusHosts = [];
 
-async function getAudiusHost() {
-  if (cachedAudiusHost) return cachedAudiusHost;
+async function getAudiusHosts() {
+  if (cachedAudiusHosts.length > 0) return cachedAudiusHosts;
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3500);
@@ -16,75 +20,112 @@ async function getAudiusHost() {
     if (res.ok) {
       const json = await res.json();
       if (Array.isArray(json?.data) && json.data.length > 0) {
-        cachedAudiusHost = json.data[0];
-        return cachedAudiusHost;
+        cachedAudiusHosts = json.data.slice(0, 4);
+        return cachedAudiusHosts;
       }
     }
   } catch {
-    // gunakan fallback host
+    // fallback ke daftar host cadangan
   }
-  cachedAudiusHost = AUDIUS_FALLBACK_HOST;
-  return cachedAudiusHost;
+  cachedAudiusHosts = FALLBACK_AUDIUS_HOSTS;
+  return cachedAudiusHosts;
+}
+
+export async function getBackupAudiusUrl(track) {
+  if (!track?.rawId) return null;
+  const hosts = await getAudiusHosts();
+  for (const h of hosts) {
+    const candidate = `${h}/v1/tracks/${track.rawId}/stream?app_name=${APP_NAME}`;
+    if (candidate !== track.audioUrl) return candidate;
+  }
+  return null;
+}
+
+function parseAudiusTitleArtist(rawTitle = '', fallbackUser = 'Independent Artist') {
+  const clean = rawTitle.trim();
+  if (clean.includes(' - ')) {
+    const [left, ...rest] = clean.split(' - ');
+    const right = rest.join(' - ').trim();
+    if (left.trim().length > 1 && right.length > 1) {
+      return { artist: left.trim(), title: right };
+    }
+  }
+  return { artist: fallbackUser, title: clean };
 }
 
 function mapAudiusTrack(item, host) {
-  if (!item || !item.id || !item.title) return null;
+  if (!item || !item.id || !item.title || item.is_streamable === false) return null;
   const cover =
     item.artwork?.['480x480'] ||
     item.artwork?.['150x150'] ||
     item.user?.profile_picture?.['480x480'] ||
     '';
+  const parsed = parseAudiusTitleArtist(
+    item.title,
+    item.user?.name || item.user?.handle || 'Audius Artist'
+  );
   return {
     id: `audius-${item.id}`,
-    title: item.title,
-    artist: item.user?.name || item.user?.handle || 'Audius Artist',
-    album: item.mood || item.genre || 'Audius Full Track',
+    rawId: item.id,
+    title: parsed.title,
+    artist: parsed.artist,
+    album: item.mood || item.genre || 'Full Track',
     cover,
     audioUrl: `${host}/v1/tracks/${item.id}/stream?app_name=${APP_NAME}`,
-    duration: Math.max(1, Number(item.duration || 180)),
+    duration: Math.max(30, Number(item.duration || 210)),
     isFullTrack: true,
+    corsSafe: true,
     source: 'audius',
-    genre: item.genre || 'Open Music',
+    genre: item.genre || 'Music',
   };
 }
 
-export async function fetchAudiusTrending(limit = 16) {
-  try {
-    const host = await getAudiusHost();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 6000);
-    const res = await fetch(
-      `${host}/v1/tracks/trending?limit=${limit}&app_name=${APP_NAME}`,
-      { signal: controller.signal }
-    );
-    clearTimeout(timer);
-    if (!res.ok) return [];
-    const json = await res.json();
-    const list = Array.isArray(json?.data) ? json.data : [];
-    return list.map((t) => mapAudiusTrack(t, host)).filter(Boolean);
-  } catch {
-    return [];
+export async function fetchAudiusTrending(limit = 18, genre = '') {
+  const hosts = await getAudiusHosts();
+  for (const host of hosts) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5500);
+      const genreQs = genre ? `&genre=${encodeURIComponent(genre)}` : '';
+      const res = await fetch(
+        `${host}/v1/tracks/trending?limit=${limit}${genreQs}&app_name=${APP_NAME}`,
+        { signal: controller.signal }
+      );
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const json = await res.json();
+      const list = Array.isArray(json?.data) ? json.data : [];
+      const mapped = list.map((t) => mapAudiusTrack(t, host)).filter(Boolean);
+      if (mapped.length > 0) return mapped;
+    } catch {
+      // coba host berikutnya
+    }
   }
+  return [];
 }
 
-export async function searchAudius(query, limit = 16) {
+export async function searchAudius(query, limit = 20) {
   if (!query || !query.trim()) return [];
-  try {
-    const host = await getAudiusHost();
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 6000);
-    const res = await fetch(
-      `${host}/v1/tracks/search?query=${encodeURIComponent(query.trim())}&limit=${limit}&app_name=${APP_NAME}`,
-      { signal: controller.signal }
-    );
-    clearTimeout(timer);
-    if (!res.ok) return [];
-    const json = await res.json();
-    const list = Array.isArray(json?.data) ? json.data : [];
-    return list.map((t) => mapAudiusTrack(t, host)).filter(Boolean);
-  } catch {
-    return [];
+  const hosts = await getAudiusHosts();
+  for (const host of hosts) {
+    try {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 5500);
+      const res = await fetch(
+        `${host}/v1/tracks/search?query=${encodeURIComponent(query.trim())}&limit=${limit}&app_name=${APP_NAME}`,
+        { signal: controller.signal }
+      );
+      clearTimeout(timer);
+      if (!res.ok) continue;
+      const json = await res.json();
+      const list = Array.isArray(json?.data) ? json.data : [];
+      const mapped = list.map((t) => mapAudiusTrack(t, host)).filter(Boolean);
+      if (mapped.length > 0) return mapped;
+    } catch {
+      // coba host berikutnya
+    }
   }
+  return [];
 }
 
 function jsonpRequest(url) {
@@ -129,7 +170,7 @@ async function queryItunes(params) {
   const url = `${ITUNES_BASE}?${qs}`;
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
+    const timer = setTimeout(() => controller.abort(), 4500);
     const res = await fetch(url, { signal: controller.signal });
     clearTimeout(timer);
     if (!res.ok) throw new Error('HTTP error');
@@ -153,6 +194,7 @@ export function mapItunesTrack(item) {
     audioUrl: item.previewUrl,
     duration: Math.max(1, Math.round((item.trackTimeMillis || 30000) / 1000)),
     isFullTrack: false,
+    corsSafe: false,
     source: 'itunes',
     genre: item.primaryGenreName || 'Pop',
   };
@@ -174,14 +216,20 @@ export async function searchItunes(query, limit = 16) {
   return mapped;
 }
 
-export async function searchMusic(query, limit = 24) {
+export async function searchMusic(query, limit = 30) {
   const [audiusRes, itunesRes] = await Promise.allSettled([
-    searchAudius(query, Math.ceil(limit / 2)),
-    searchItunes(query, Math.ceil(limit / 2)),
+    searchAudius(query, Math.ceil(limit * 0.65)),
+    searchItunes(query, Math.ceil(limit * 0.45)),
   ]);
   const fullTracks = audiusRes.status === 'fulfilled' ? audiusRes.value : [];
   const previews = itunesRes.status === 'fulfilled' ? itunesRes.value : [];
-  return [...fullTracks, ...previews];
+  const merged = [...fullTracks, ...previews];
+  const seen = new Set();
+  return merged.filter((t) => {
+    if (seen.has(t.id)) return false;
+    seen.add(t.id);
+    return true;
+  });
 }
 
 export async function fetchExactTrack(artist, title) {
@@ -225,13 +273,30 @@ const CURATED_SEEDS = [
   { artist: 'Bruno Mars', title: 'Die With A Smile' },
   { artist: 'Juicy Luicy', title: 'Lantas' },
   { artist: 'Coldplay', title: 'Yellow' },
+  { artist: 'Pamungkas', title: 'To the Bone' },
+  { artist: 'Billie Eilish', title: 'BIRDS OF A FEATHER' },
 ];
 
 export async function fetchCuratedCatalog() {
-  const [audiusTrending, itunesSettled] = await Promise.all([
-    fetchAudiusTrending(12),
+  const [
+    audiusGlobal,
+    audiusIndo,
+    audiusPop,
+    audiusLofi,
+    itunesSettled,
+  ] = await Promise.all([
+    fetchAudiusTrending(14),
+    searchAudius('indonesia acoustic pop cover', 12),
+    fetchAudiusTrending(10, 'Pop'),
+    searchAudius('lofi chill slow reverb', 10),
     Promise.allSettled(CURATED_SEEDS.map((seed) => fetchExactTrack(seed.artist, seed.title))),
   ]);
+
+  const fullMap = new Map();
+  for (const t of [...audiusGlobal, ...audiusIndo, ...audiusPop, ...audiusLofi]) {
+    if (t && !fullMap.has(t.id)) fullMap.set(t.id, t);
+  }
+  const fullTracks = Array.from(fullMap.values());
 
   const popTracks = [];
   const seenIds = new Set();
@@ -243,9 +308,9 @@ export async function fetchCuratedCatalog() {
   }
 
   return {
-    fullTracks: audiusTrending,
+    fullTracks,
     popTracks,
-    all: [...audiusTrending, ...popTracks],
+    all: [...fullTracks, ...popTracks],
   };
 }
 
@@ -283,6 +348,17 @@ function normalizeText(str = '') {
     .trim();
 }
 
+function wordOverlapScore(a, b) {
+  const wa = new Set(normalizeText(a).split(' ').filter((w) => w.length > 1));
+  const wb = new Set(normalizeText(b).split(' ').filter((w) => w.length > 1));
+  if (wa.size === 0 || wb.size === 0) return 0;
+  let hits = 0;
+  for (const w of wa) {
+    if (wb.has(w)) hits++;
+  }
+  return hits / Math.max(wa.size, wb.size);
+}
+
 export async function fetchTrackLyrics(title, artist, durationSec = 0) {
   if (!title) return { synced: [], plain: null, matchedTitle: '' };
   const cleanTitle = title.replace(/\s*\([^)]*\)|\s*\[[^\]]*\]/g, '').trim();
@@ -318,19 +394,10 @@ export async function fetchTrackLyrics(title, artist, durationSec = 0) {
     if (searchRes.ok) {
       const items = await searchRes.json();
       if (Array.isArray(items) && items.length > 0) {
-        const targetTitle = normalizeText(cleanTitle);
-        const targetArtist = normalizeText(cleanArtist);
-
         const strictMatches = items.filter((item) => {
-          const t = normalizeText(item.trackName);
-          const a = normalizeText(item.artistName);
-          const titleOk = t === targetTitle || t.includes(targetTitle) || targetTitle.includes(t);
-          const artistOk =
-            !targetArtist ||
-            a.includes(targetArtist) ||
-            targetArtist.includes(a) ||
-            a.split(' ')[0] === targetArtist.split(' ')[0];
-          return titleOk && artistOk;
+          const tScore = wordOverlapScore(item.trackName, cleanTitle);
+          const aScore = wordOverlapScore(item.artistName, cleanArtist);
+          return tScore >= 0.6 && aScore >= 0.5;
         });
 
         const best =
@@ -351,4 +418,27 @@ export async function fetchTrackLyrics(title, artist, durationSec = 0) {
   }
 
   return { synced: [], plain: null, matchedTitle: '' };
+}
+
+export async function searchLyricsManual(query) {
+  if (!query || !query.trim()) return [];
+  try {
+    const res = await fetch(`${LRCLIB_BASE}/search?q=${encodeURIComponent(query.trim())}`);
+    if (!res.ok) return [];
+    const items = await res.json();
+    return (Array.isArray(items) ? items : [])
+      .filter((i) => i.syncedLyrics || i.plainLyrics)
+      .slice(0, 12)
+      .map((i) => ({
+        id: i.id,
+        title: i.trackName,
+        artist: i.artistName,
+        duration: i.duration || 0,
+        synced: i.syncedLyrics ? parseLRC(i.syncedLyrics) : [],
+        plain: i.plainLyrics || null,
+        matchedTitle: `${i.artistName} — ${i.trackName}`,
+      }));
+  } catch {
+    return [];
+  }
 }

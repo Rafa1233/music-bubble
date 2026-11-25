@@ -1,11 +1,12 @@
 import React from 'react';
 import { motion } from 'framer-motion';
-import { Home, Search, Library, Settings } from 'lucide-react';
+import { Home, Search, Mic2, Library, Settings } from 'lucide-react';
 import { useTheme } from '../context/ThemeContext';
 
 const TABS = [
   { id: 'home', label: 'Home', icon: Home },
   { id: 'search', label: 'Search', icon: Search },
+  { id: 'karaoke', label: 'Karaoke', icon: Mic2 },
   { id: 'library', label: 'Library', icon: Library },
   { id: 'settings', label: 'Settings', icon: Settings },
 ];
@@ -17,9 +18,9 @@ export default function BubbleNavbar({ activeTab, onChangeTab, swipeProgress = 0
   return (
     <nav
       aria-label="Navigasi Utama"
-      className="fixed bottom-4 inset-x-0 z-40 flex justify-center px-4 pointer-events-none"
+      className="fixed bottom-4 inset-x-0 z-40 flex justify-center px-3 pointer-events-none"
     >
-      <div className="bubble-glass gpu-layer pointer-events-auto rounded-full p-1.5 flex items-center gap-1 max-w-md w-full justify-between relative overflow-hidden">
+      <div className="bubble-glass gpu-layer pointer-events-auto rounded-full p-1.5 flex items-center gap-0.5 max-w-lg w-full justify-between relative overflow-hidden">
         {TABS.map((tab) => {
           const Icon = tab.icon;
           const isActive = activeTab === tab.id;
@@ -29,7 +30,7 @@ export default function BubbleNavbar({ activeTab, onChangeTab, swipeProgress = 0
               type="button"
               onClick={() => onChangeTab(tab.id)}
               whileTap={{ scale: 1.06 }}
-              className="relative flex-1 py-2 px-3 rounded-full flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2 transition-colors z-10"
+              className="relative flex-1 py-2 px-1.5 sm:px-3 rounded-full flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 transition-colors z-10 min-w-0"
             >
               {isActive && (
                 <motion.span
@@ -54,7 +55,7 @@ export default function BubbleNavbar({ activeTab, onChangeTab, swipeProgress = 0
                 transition={{ type: 'spring', stiffness: 380, damping: 24 }}
               >
                 <Icon
-                  className="w-5 h-5"
+                  className="w-4 h-4 sm:w-5 sm:h-5"
                   style={{
                     color: isActive ? settings.accentColor : 'var(--text-secondary)',
                   }}
@@ -62,7 +63,7 @@ export default function BubbleNavbar({ activeTab, onChangeTab, swipeProgress = 0
               </motion.div>
 
               <span
-                className={`text-[11px] sm:text-xs font-semibold ${
+                className={`text-[10px] sm:text-xs font-semibold truncate ${
                   isActive ? 'text-main' : 'text-muted'
                 }`}
               >

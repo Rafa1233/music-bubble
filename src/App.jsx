@@ -9,10 +9,11 @@ import MiniPlayer from './components/MiniPlayer';
 import FullPlayerWithLyrics from './components/FullPlayerWithLyrics';
 import Home from './pages/Home';
 import Search from './pages/Search';
+import KaraokeStudio from './pages/KaraokeStudio';
 import Library from './pages/Library';
 import Settings from './pages/Settings';
 
-const TAB_ORDER = ['home', 'search', 'library', 'settings'];
+const TAB_ORDER = ['home', 'search', 'karaoke', 'library', 'settings'];
 
 function MainShell() {
   const { settings } = useTheme();
@@ -122,6 +123,7 @@ function MainShell() {
           >
             {activeTab === 'home' && <Home />}
             {activeTab === 'search' && <Search />}
+            {activeTab === 'karaoke' && <KaraokeStudio />}
             {activeTab === 'library' && <Library />}
             {activeTab === 'settings' && <Settings />}
           </motion.div>
