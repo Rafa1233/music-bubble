@@ -1,314 +1,25 @@
-const ITUNES_BASE = 'https://itunes.apple.com/search';
+import { MusicProviderManager } from './music/MusicProviderManager';
+import { smartSearchMusic } from './music/MusicSearchService';
+import { getBackupAudiusStreamUrl } from './music/providers/audius/audiusProvider';
+
 const LRCLIB_BASE = 'https://lrclib.net/api';
-const AUDIUS_DISCOVERY_LIST = 'https://api.audius.co';
-const FALLBACK_AUDIUS_HOSTS = [
-  'https://discoveryprovider.audius.co',
-  'https://discoveryprovider2.audius.co',
-  'https://discoveryprovider3.audius.co',
-];
-const APP_NAME = 'AuraSound';
-
-let cachedAudiusHosts = [];
-
-async function getAudiusHosts() {
-  if (cachedAudiusHosts.length > 0) return cachedAudiusHosts;
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3500);
-    const res = await fetch(AUDIUS_DISCOVERY_LIST, { signal: controller.signal });
-    clearTimeout(timer);
-    if (res.ok) {
-      const json = await res.json();
-      if (Array.isArray(json?.data) && json.data.length > 0) {
-        cachedAudiusHosts = json.data.slice(0, 4);
-        return cachedAudiusHosts;
-      }
-    }
-  } catch {
-    // fallback ke daftar host cadangan
-  }
-  cachedAudiusHosts = FALLBACK_AUDIUS_HOSTS;
-  return cachedAudiusHosts;
-}
 
 export async function getBackupAudiusUrl(track) {
-  if (!track?.rawId) return null;
-  const hosts = await getAudiusHosts();
-  for (const h of hosts) {
-    const candidate = `${h}/v1/tracks/${track.rawId}/stream?app_name=${APP_NAME}`;
-    if (candidate !== track.audioUrl) return candidate;
-  }
-  return null;
+  return getBackupAudiusStreamUrl(track);
 }
 
-function parseAudiusTitleArtist(rawTitle = '', fallbackUser = 'Independent Artist') {
-  const clean = rawTitle.trim();
-  if (clean.includes(' - ')) {
-    const [left, ...rest] = clean.split(' - ');
-    const right = rest.join(' - ').trim();
-    if (left.trim().length > 1 && right.length > 1) {
-      return { artist: left.trim(), title: right };
-    }
-  }
-  return { artist: fallbackUser, title: clean };
+export async function searchMusic(query, limit = 25) {
+  const res = await smartSearchMusic(query, { page: 1, limit });
+  return res.all;
 }
-
-function mapAudiusTrack(item, host) {
-  if (!item || !item.id || !item.title || item.is_streamable === false) return null;
-  const cover =
-    item.artwork?.['480x480'] ||
-    item.artwork?.['150x150'] ||
-    item.user?.profile_picture?.['480x480'] ||
-    '';
-  const parsed = parseAudiusTitleArtist(
-    item.title,
-    item.user?.name || item.user?.handle || 'Audius Artist'
-  );
-  return {
-    id: `audius-${item.id}`,
-    rawId: item.id,
-    title: parsed.title,
-    artist: parsed.artist,
-    album: item.mood || item.genre || 'Full Track',
-    cover,
-    audioUrl: `${host}/v1/tracks/${item.id}/stream?app_name=${APP_NAME}`,
-    duration: Math.max(30, Number(item.duration || 210)),
-    isFullTrack: true,
-    corsSafe: true,
-    source: 'audius',
-    genre: item.genre || 'Music',
-  };
-}
-
-export async function fetchAudiusTrending(limit = 18, genre = '') {
-  const hosts = await getAudiusHosts();
-  for (const host of hosts) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 5500);
-      const genreQs = genre ? `&genre=${encodeURIComponent(genre)}` : '';
-      const res = await fetch(
-        `${host}/v1/tracks/trending?limit=${limit}${genreQs}&app_name=${APP_NAME}`,
-        { signal: controller.signal }
-      );
-      clearTimeout(timer);
-      if (!res.ok) continue;
-      const json = await res.json();
-      const list = Array.isArray(json?.data) ? json.data : [];
-      const mapped = list.map((t) => mapAudiusTrack(t, host)).filter(Boolean);
-      if (mapped.length > 0) return mapped;
-    } catch {
-      // coba host berikutnya
-    }
-  }
-  return [];
-}
-
-export async function searchAudius(query, limit = 20) {
-  if (!query || !query.trim()) return [];
-  const hosts = await getAudiusHosts();
-  for (const host of hosts) {
-    try {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), 5500);
-      const res = await fetch(
-        `${host}/v1/tracks/search?query=${encodeURIComponent(query.trim())}&limit=${limit}&app_name=${APP_NAME}`,
-        { signal: controller.signal }
-      );
-      clearTimeout(timer);
-      if (!res.ok) continue;
-      const json = await res.json();
-      const list = Array.isArray(json?.data) ? json.data : [];
-      const mapped = list.map((t) => mapAudiusTrack(t, host)).filter(Boolean);
-      if (mapped.length > 0) return mapped;
-    } catch {
-      // coba host berikutnya
-    }
-  }
-  return [];
-}
-
-function jsonpRequest(url) {
-  return new Promise((resolve, reject) => {
-    const callbackName = `itunes_cb_${Date.now()}_${Math.floor(Math.random() * 100000)}`;
-    const script = document.createElement('script');
-    const timeout = setTimeout(() => {
-      cleanup();
-      reject(new Error('JSONP timeout'));
-    }, 8000);
-
-    function cleanup() {
-      clearTimeout(timeout);
-      if (window[callbackName]) delete window[callbackName];
-      if (script.parentNode) script.parentNode.removeChild(script);
-    }
-
-    window[callbackName] = (data) => {
-      cleanup();
-      resolve(data);
-    };
-
-    script.onerror = () => {
-      cleanup();
-      reject(new Error('JSONP error'));
-    };
-
-    const sep = url.includes('?') ? '&' : '?';
-    script.src = `${url}${sep}callback=${callbackName}`;
-    document.head.appendChild(script);
-  });
-}
-
-async function queryItunes(params) {
-  const qs = new URLSearchParams({
-    media: 'music',
-    entity: 'song',
-    country: 'ID',
-    ...params,
-  }).toString();
-
-  const url = `${ITUNES_BASE}?${qs}`;
-  try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 4500);
-    const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!res.ok) throw new Error('HTTP error');
-    return await res.json();
-  } catch {
-    return await jsonpRequest(url);
-  }
-}
-
-export function mapItunesTrack(item) {
-  if (!item || !item.previewUrl || !item.trackId) return null;
-  const highResCover = (item.artworkUrl100 || '')
-    .replace('100x100bb', '600x600bb')
-    .replace('100x100', '600x600');
-  return {
-    id: `itunes-${item.trackId}`,
-    title: item.trackName || 'Tanpa Judul',
-    artist: item.artistName || 'Artis Tidak Diketahui',
-    album: item.collectionName || 'Single',
-    cover: highResCover || item.artworkUrl100 || '',
-    audioUrl: item.previewUrl,
-    duration: Math.max(1, Math.round((item.trackTimeMillis || 30000) / 1000)),
-    isFullTrack: false,
-    corsSafe: false,
-    source: 'itunes',
-    genre: item.primaryGenreName || 'Pop',
-  };
-}
-
-export async function searchItunes(query, limit = 16) {
-  if (!query || !query.trim()) return [];
-  const data = await queryItunes({ term: query.trim(), limit: String(limit) });
-  const list = Array.isArray(data?.results) ? data.results : [];
-  const seen = new Set();
-  const mapped = [];
-  for (const item of list) {
-    const track = mapItunesTrack(item);
-    if (track && !seen.has(track.id)) {
-      seen.add(track.id);
-      mapped.push(track);
-    }
-  }
-  return mapped;
-}
-
-export async function searchMusic(query, limit = 30) {
-  const [audiusRes, itunesRes] = await Promise.allSettled([
-    searchAudius(query, Math.ceil(limit * 0.65)),
-    searchItunes(query, Math.ceil(limit * 0.45)),
-  ]);
-  const fullTracks = audiusRes.status === 'fulfilled' ? audiusRes.value : [];
-  const previews = itunesRes.status === 'fulfilled' ? itunesRes.value : [];
-  const merged = [...fullTracks, ...previews];
-  const seen = new Set();
-  return merged.filter((t) => {
-    if (seen.has(t.id)) return false;
-    seen.add(t.id);
-    return true;
-  });
-}
-
-export async function fetchExactTrack(artist, title) {
-  try {
-    const data = await queryItunes({
-      term: `${artist} ${title}`,
-      limit: '10',
-    });
-    const results = (data?.results || []).map(mapItunesTrack).filter(Boolean);
-    if (results.length === 0) return null;
-
-    const aLower = artist.toLowerCase();
-    const tLower = title.toLowerCase();
-
-    const exact = results.find(
-      (r) =>
-        r.artist.toLowerCase().includes(aLower) &&
-        r.title.toLowerCase().includes(tLower)
-    );
-    if (exact) return exact;
-
-    const byMatch = results.find(
-      (r) =>
-        r.title.toLowerCase().includes(tLower) &&
-        r.artist.toLowerCase().split(' ')[0] === aLower.split(' ')[0]
-    );
-    return byMatch || results[0];
-  } catch {
-    return null;
-  }
-}
-
-const CURATED_SEEDS = [
-  { artist: 'Mahalini', title: 'Sial' },
-  { artist: 'Tulus', title: 'Hati-Hati di Jalan' },
-  { artist: 'Bernadya', title: 'Satu Bulan' },
-  { artist: 'Hindia', title: 'Evaluasi' },
-  { artist: 'NIKI', title: 'lowkey' },
-  { artist: 'Ed Sheeran', title: 'Perfect' },
-  { artist: 'The Weeknd', title: 'Blinding Lights' },
-  { artist: 'Bruno Mars', title: 'Die With A Smile' },
-  { artist: 'Juicy Luicy', title: 'Lantas' },
-  { artist: 'Coldplay', title: 'Yellow' },
-  { artist: 'Pamungkas', title: 'To the Bone' },
-  { artist: 'Billie Eilish', title: 'BIRDS OF A FEATHER' },
-];
 
 export async function fetchCuratedCatalog() {
-  const [
-    audiusGlobal,
-    audiusIndo,
-    audiusPop,
-    audiusLofi,
-    itunesSettled,
-  ] = await Promise.all([
-    fetchAudiusTrending(14),
-    searchAudius('indonesia acoustic pop cover', 12),
-    fetchAudiusTrending(10, 'Pop'),
-    searchAudius('lofi chill slow reverb', 10),
-    Promise.allSettled(CURATED_SEEDS.map((seed) => fetchExactTrack(seed.artist, seed.title))),
+  const [fullTracks, popTracks] = await Promise.all([
+    MusicProviderManager.fetchCategoryTracks('audius-trending', { page: 1, limit: 25 }),
+    MusicProviderManager.fetchCategoryTracks('indo-popular', { page: 1, limit: 25 }),
   ]);
-
-  const fullMap = new Map();
-  for (const t of [...audiusGlobal, ...audiusIndo, ...audiusPop, ...audiusLofi]) {
-    if (t && !fullMap.has(t.id)) fullMap.set(t.id, t);
-  }
-  const fullTracks = Array.from(fullMap.values());
-
-  const popTracks = [];
-  const seenIds = new Set();
-  for (const res of itunesSettled) {
-    if (res.status === 'fulfilled' && res.value && !seenIds.has(res.value.id)) {
-      seenIds.add(res.value.id);
-      popTracks.push(res.value);
-    }
-  }
-
   return {
-    fullTracks,
+    fullTracks: fullTracks.filter((t) => t.isFullTrack),
     popTracks,
     all: [...fullTracks, ...popTracks],
   };
@@ -384,7 +95,7 @@ export async function fetchTrackLyrics(title, artist, durationSec = 0) {
       }
     }
   } catch {
-    // lanjut ke pencarian ketat
+    // lanjut ke search ketat
   }
 
   try {
@@ -414,7 +125,7 @@ export async function fetchTrackLyrics(title, artist, durationSec = 0) {
       }
     }
   } catch {
-    // abaikan error jaringan
+    // abaikan
   }
 
   return { synced: [], plain: null, matchedTitle: '' };

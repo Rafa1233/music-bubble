@@ -12,6 +12,8 @@
     "@capacitor/android": "^8.6.2",
     "@capacitor/cli": "^8.6.2",
     "@capacitor/core": "^8.6.2",
+    "@capawesome-team/capacitor-android-foreground-service": "^8.1.0",
+    "@capgo/capacitor-media-session": "^8.1.11",
     "firebase": "^10.14.1",
     "framer-motion": "^11.11.17",
     "lucide-react": "^0.454.0",

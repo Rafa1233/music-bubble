@@ -1,12 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Search as SearchIcon, Upload, Clock, X, Music } from 'lucide-react';
-import { searchMusic } from '../services/musicApi';
+import { Search as SearchIcon, Upload, Clock, X, Music, ChevronRight } from 'lucide-react';
+import { smartSearchMusic } from '../services/music/MusicSearchService';
+import { MusicProviderManager } from '../services/music/MusicProviderManager';
+import { AUDIO_STATUS } from '../services/music/TrackNormalizer';
 import { useAudio } from '../context/AudioContext';
 import { useTheme } from '../context/ThemeContext';
 import SongCard from '../components/SongCard';
 
 const HISTORY_KEY = 'aurasound_search_history_v1';
-const CATEGORIES = ['Semua', 'Full Track', 'Pop & Artis', 'Lokal'];
+const CATEGORIES = ['Semua', 'Full Track', 'Preview 30s', 'External', 'Lokal'];
 
 export default function Search() {
   const { localTracks, uploadLocalAudioFiles, catalog } = useAudio();
@@ -14,8 +16,11 @@ export default function Search() {
 
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState('Semua');
-  const [results, setResults] = useState([]);
+  const [data, setData] = useState({ all: [], fullTracks: [], previews: [], external: [], hasMore: false });
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [error, setError] = useState('');
   const [uploadMsg, setUploadMsg] = useState('');
   const [history, setHistory] = useState(() => {
     try {
@@ -26,38 +31,28 @@ export default function Search() {
   });
 
   const fileInputRef = useRef(null);
+  const abortRef = useRef(null);
+  const providerStatuses = MusicProviderManager.getProviderStatuses();
 
-  useEffect(() => {
-    if (category === 'Lokal') {
-      const q = query.trim().toLowerCase();
-      setResults(
-        q
-          ? localTracks.filter(
-              (t) => t.title.toLowerCase().includes(q) || t.artist.toLowerCase().includes(q)
-            )
-          : localTracks
-      );
-      return;
+  const runSearch = async (qStr, pageNum = 1, append = false) => {
+    if (abortRef.current) abortRef.current.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    if (append) setLoadingMore(true);
+    else {
+      setLoading(true);
+      setError('');
     }
 
-    if (!query.trim()) {
-      setResults([]);
-      return;
-    }
+    try {
+      const res = await smartSearchMusic(qStr, { page: pageNum, limit: 25, signal: controller.signal });
+      if (controller.signal.aborted) return;
 
-    setLoading(true);
-    const timer = setTimeout(async () => {
-      try {
-        const fetched = await searchMusic(query.trim(), 24);
-        let filtered = fetched;
-        if (category === 'Full Track') {
-          filtered = fetched.filter((t) => t.isFullTrack);
-        } else if (category === 'Pop & Artis') {
-          filtered = fetched.filter((t) => !t.isFullTrack);
-        }
-        setResults(filtered);
+      if (!append) {
+        setData(res);
         setHistory((prev) => {
-          const next = [query.trim(), ...prev.filter((h) => h !== query.trim())].slice(0, 6);
+          const next = [qStr, ...prev.filter((h) => h !== qStr)].slice(0, 8);
           try {
             localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
           } catch {
@@ -65,29 +60,73 @@ export default function Search() {
           }
           return next;
         });
-      } catch {
-        setResults([]);
-      } finally {
-        setLoading(false);
+      } else {
+        setData((prev) => {
+          const mergeUnique = (a, b) => [...a, ...b.filter((item) => !a.some((x) => x.id === item.id))];
+          return {
+            all: mergeUnique(prev.all, res.all),
+            fullTracks: mergeUnique(prev.fullTracks, res.fullTracks),
+            previews: mergeUnique(prev.previews, res.previews),
+            external: mergeUnique(prev.external, res.external),
+            hasMore: res.hasMore,
+          };
+        });
       }
-    }, 300);
+    } catch (err) {
+      if (err?.name !== 'AbortError') setError('Pencarian gagal sementara. Periksa koneksi Anda.');
+    } finally {
+      if (!controller.signal.aborted) {
+        setLoading(false);
+        setLoadingMore(false);
+      }
+    }
+  };
 
-    return () => clearTimeout(timer);
-  }, [query, category, localTracks]);
+  useEffect(() => {
+    if (category === 'Lokal') return;
+    if (!query.trim()) {
+      setData({ all: [], fullTracks: [], previews: [], external: [], hasMore: false });
+      return;
+    }
+
+    setPage(1);
+    const timer = setTimeout(() => runSearch(query.trim(), 1, false), 320);
+    return () => {
+      clearTimeout(timer);
+      abortRef.current?.abort();
+    };
+  }, [query, category]);
 
   const handleLocalUpload = async (e) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const added = await uploadLocalAudioFiles(files);
+    const added = await uploadLocalAudioFiles(e.target.files);
     if (added.length > 0) {
-      setUploadMsg(`${added.length} file audio lokal berhasil ditambahkan!`);
+      setUploadMsg(`${added.length} file audio lokal ditambahkan.`);
       setCategory('Lokal');
     }
     e.target.value = '';
   };
 
+  const localFiltered = query.trim()
+    ? localTracks.filter(
+        (t) =>
+          t.title.toLowerCase().includes(query.trim().toLowerCase()) ||
+          t.artist.toLowerCase().includes(query.trim().toLowerCase())
+      )
+    : localTracks;
+
+  const visibleTracks =
+    category === 'Lokal'
+      ? localFiltered
+      : category === 'Full Track'
+      ? data.fullTracks
+      : category === 'Preview 30s'
+      ? data.previews
+      : category === 'External'
+      ? data.external
+      : data.all;
+
   return (
-    <div className="space-y-5 pb-6">
+    <div className="space-y-4 pb-6">
       <div className="flex flex-col sm:flex-row gap-2.5">
         <div className="glass-input flex-1 rounded-2xl px-4 py-3 flex items-center gap-3">
           <SearchIcon className="w-5 h-5 text-muted shrink-0" />
@@ -95,7 +134,7 @@ export default function Search() {
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Cari lagu full / artis (Mahalini, Tulus, lofi, remix)..."
+            placeholder="Cari judul, artis, album, genre (Mahalini, NIKI, Jazz, Lofi)..."
             className="w-full bg-transparent outline-none text-sm text-main placeholder:opacity-60"
           />
           {query && (
@@ -116,15 +155,24 @@ export default function Search() {
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="px-4 py-3 rounded-2xl font-semibold text-sm text-zinc-950 flex items-center justify-center gap-2 shrink-0 shadow-md hover:brightness-110 active:scale-95 transition"
+          className="px-4 py-3 rounded-2xl font-semibold text-sm text-zinc-950 flex items-center justify-center gap-2 shrink-0 shadow-md"
           style={{ backgroundColor: settings.accentColor }}
         >
-          <Upload className="w-4 h-4" /> Putar MP3/FLAC Lokal
+          <Upload className="w-4 h-4" /> File MP3/FLAC
         </button>
       </div>
 
+      {/* Status Provider Aktif */}
+      <div data-no-tab-swipe className="flex gap-1.5 overflow-x-auto no-scrollbar text-[10px]">
+        {Object.values(providerStatuses).map((p) => (
+          <span key={p.name} className={`px-2.5 py-1 rounded-full glass-subtle shrink-0 ${p.active ? 'text-main' : 'text-muted opacity-60'}`}>
+            {p.name}: {p.active ? p.type : 'Butuh API Key'}
+          </span>
+        ))}
+      </div>
+
       {uploadMsg && (
-        <div className="glass-card rounded-2xl px-4 py-2.5 text-xs font-medium flex items-center justify-between text-main">
+        <div className="glass-card rounded-2xl px-4 py-2 text-xs flex items-center justify-between text-main">
           <span>{uploadMsg}</span>
           <button type="button" onClick={() => setUploadMsg('')}>
             <X className="w-4 h-4" />
@@ -140,8 +188,8 @@ export default function Search() {
               key={cat}
               type="button"
               onClick={() => setCategory(cat)}
-              className={`px-4 py-1.5 rounded-full text-xs font-semibold transition shrink-0 ${
-                active ? 'text-zinc-950' : 'glass-card text-main opacity-80 hover:opacity-100'
+              className={`px-3.5 py-1.5 rounded-full text-xs font-semibold transition shrink-0 ${
+                active ? 'text-zinc-950' : 'glass-card text-main opacity-80'
               }`}
               style={active ? { backgroundColor: settings.accentColor } : undefined}
             >
@@ -158,12 +206,7 @@ export default function Search() {
           </p>
           <div className="flex flex-wrap gap-2">
             {history.map((item) => (
-              <button
-                key={item}
-                type="button"
-                onClick={() => setQuery(item)}
-                className="glass-card px-3 py-1.5 rounded-full text-xs text-main"
-              >
+              <button key={item} type="button" onClick={() => setQuery(item)} className="glass-card px-3 py-1.5 rounded-full text-xs text-main">
                 {item}
               </button>
             ))}
@@ -171,28 +214,83 @@ export default function Search() {
         </div>
       )}
 
+      {error && <p className="text-xs text-amber-400">{error}</p>}
+
       {loading ? (
         <div className="space-y-2.5">
-          {Array.from({ length: 5 }).map((_, i) => (
+          {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="glass-card h-16 rounded-2xl animate-pulse" />
           ))}
         </div>
-      ) : results.length > 0 ? (
-        <div className="space-y-2.5">
-          {results.map((track, idx) => (
-            <SongCard key={track.id} track={track} queueList={results} layout="row" index={idx} />
-          ))}
+      ) : visibleTracks.length > 0 ? (
+        <div className="space-y-5">
+          {category === 'Semua' ? (
+            <>
+              {data.fullTracks.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-bold uppercase tracking-wider text-muted">
+                    Full Track Legal ({data.fullTracks.length})
+                  </p>
+                  {data.fullTracks.map((t, idx) => (
+                    <SongCard key={t.id} track={t} queueList={data.fullTracks} layout="row" index={idx} />
+                  ))}
+                </div>
+              )}
+              {data.previews.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-bold uppercase tracking-wider text-muted">
+                    Preview 30 Detik — Apple iTunes ({data.previews.length})
+                  </p>
+                  {data.previews.map((t, idx) => (
+                    <SongCard key={t.id} track={t} queueList={data.previews} layout="row" index={idx} />
+                  ))}
+                </div>
+              )}
+              {data.external.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-bold uppercase tracking-wider text-muted">
+                    Tersedia via Pemutar Resmi Eksternal ({data.external.length})
+                  </p>
+                  {data.external.map((t, idx) => (
+                    <SongCard key={t.id} track={t} queueList={data.external} layout="row" index={idx} />
+                  ))}
+                </div>
+              )}
+            </>
+          ) : (
+            <div className="space-y-2">
+              {visibleTracks.map((t, idx) => (
+                <SongCard key={t.id} track={t} queueList={visibleTracks} layout="row" index={idx} />
+              ))}
+            </div>
+          )}
+
+          {category !== 'Lokal' && data.hasMore && (
+            <button
+              type="button"
+              disabled={loadingMore}
+              onClick={() => {
+                const next = page + 1;
+                setPage(next);
+                runSearch(query.trim(), next, true);
+              }}
+              className="w-full py-3 rounded-2xl glass-card text-xs font-bold text-main flex items-center justify-center gap-1.5"
+            >
+              {loadingMore ? 'Memuat...' : 'Muat Hasil Berikutnya'}
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          )}
         </div>
       ) : query.trim() ? (
         <div className="glass-card rounded-3xl p-8 text-center text-muted">
           <Music className="w-10 h-10 mx-auto mb-2 opacity-60" />
-          <p className="text-sm">Tidak ada lagu ditemukan untuk "{query}".</p>
+          <p className="text-sm">Tidak ada hasil untuk "{query}" pada filter ini.</p>
         </div>
       ) : (
         <div>
-          <p className="text-sm font-heading font-bold mb-3 text-main">Jelajahi Populer</p>
+          <p className="text-sm font-heading font-bold mb-3 text-main">Rekomendasi Full Track</p>
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-            {catalog.slice(0, 8).map((track, idx) => (
+            {catalog.filter((t) => t.audioStatus === AUDIO_STATUS.FULL_TRACK).slice(0, 8).map((track, idx) => (
               <SongCard key={track.id} track={track} queueList={catalog} index={idx} />
             ))}
           </div>

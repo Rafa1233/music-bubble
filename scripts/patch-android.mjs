@@ -47,8 +47,10 @@ if (fs.existsSync(manifestPath)) {
       '<application android:hardwareAccelerated="true" android:largeHeap="true" android:usesCleartextTraffic="true"'
     );
   }
+
   const perms = [
     'android.permission.WAKE_LOCK',
+    'android.permission.POST_NOTIFICATIONS',
     'android.permission.FOREGROUND_SERVICE',
     'android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK',
     'android.permission.RECORD_AUDIO',
@@ -62,6 +64,20 @@ if (fs.existsSync(manifestPath)) {
       );
     }
   }
+
+  if (!manifest.includes('AndroidForegroundService')) {
+    const serviceBlock = `
+        <receiver
+            android:name="io.capawesome.capacitorjs.plugins.foregroundservice.NotificationActionBroadcastReceiver"
+            android:exported="false" />
+        <service
+            android:name="io.capawesome.capacitorjs.plugins.foregroundservice.AndroidForegroundService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="false" />
+    </application>`;
+    manifest = manifest.replace('</application>', serviceBlock);
+  }
+
   fs.writeFileSync(manifestPath, manifest);
 }
 
@@ -125,4 +141,4 @@ public class MainActivity extends BridgeActivity {
 `
 );
 
-console.log('Android patch 120Hz, mic permission & dual flavors selesai');
+console.log('Android patch ForegroundService mediaPlayback + 120Hz + dual flavors selesai');
